@@ -1,0 +1,6 @@
+{
+  "name": "RetroBox Mobile",
+  "description": "Launcher de jogos retrô nativo com interface premium neon.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
