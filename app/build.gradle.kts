@@ -1,4 +1,4 @@
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+﻿import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
     alias(libs.plugins.android.application)
@@ -8,17 +8,44 @@ plugins {
 }
 
 android {
-    namespace = "com.example"
+    namespace = "com.retrobox"
     compileSdk = 36
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        applicationId = "com.aistudio.retrobox.mvxkzt"
-        minSdk = 24
+        applicationId = "com.retrobox.mobile"
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
+        ndk {
+            // Only 64-bit ARM: every bundled libretro core is arm64-v8a.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_CPP_FEATURES=exceptions rtti")
+            }
+        }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Extract the prebuilt libretro cores at install time instead of loading
+            // them straight from the APK: they are not 16 KB page aligned.
+            useLegacyPackaging = true
+        }
     }
 
     // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -141,3 +168,4 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
