@@ -1,0 +1,137 @@
+package com.retrobox.emulation
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Log
+import com.retrobox.domain.Console
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+
+/**
+ * Baixa as capas (box art) do repositorio oficial do libretro
+ * (github.com/libretro-thumbnails) e guarda em cache dentro do app.
+ *
+ * Nenhuma ROM ou conteudo protegido e baixado aqui: apenas imagens de capa.
+ */
+object CoverStore {
+
+    private const val TAG = "RetroBoxCover"
+    private const val BASE = "https://raw.githubusercontent.com/libretro-thumbnails"
+    private const val MAX_WIDTH = 480
+    private const val TIMEOUT_MS = 8000
+
+    /** Repositorio de thumbnails de cada sistema. */
+    private val REPOSITORIES = mapOf(
+        Console.NES to "Nintendo_-_Nintendo_Entertainment_System",
+        Console.SNES to "Nintendo_-_Super_Nintendo_Entertainment_System",
+        Console.GB to "Nintendo_-_Game_Boy",
+        Console.GBC to "Nintendo_-_Game_Boy_Color",
+        Console.GBA to "Nintendo_-_Game_Boy_Advance",
+        Console.MEGADRIVE to "Sega_-_Mega_Drive_-_Genesis",
+        Console.N64 to "Nintendo_-_Nintendo_64",
+        Console.PS1 to "Sony_-_PlayStation",
+        Console.PSP to "Sony_-_PlayStation_Portable"
+    )
+
+    /** Pastas do repositorio: box art (capa de caixa) e snapshot (foto da tela). */
+    private val FOLDERS = listOf("Named_Boxarts", "Named_Snaps")
+
+    /**
+     * Procura a capa de um jogo. Devolve o caminho do arquivo local ou null
+     * quando nao existe capa (o app usa um placeholder gerado).
+     */
+    suspend fun coverFor(context: Context, console: Console, rawTitle: String): String? =
+        withContext(Dispatchers.IO) {
+            val repository = REPOSITORIES[console] ?: return@withContext null
+            val variants = GameTitle.variants(rawTitle)
+            if (variants.isEmpty()) return@withContext null
+
+            val target = cacheFile(context, console, variants.first())
+            if (target.exists() && target.length() > 0L) return@withContext target.absolutePath
+
+            for (variant in variants) {
+                for (folder in FOLDERS) {
+                    val url = "$BASE/$repository/master/$folder/" + encode(variant) + ".png"
+                    if (!exists(url)) continue
+                    val file = cacheFile(context, console, variant)
+                    if (file.exists() && file.length() > 0L) return@withContext file.absolutePath
+                    if (download(url, file)) {
+                        return@withContext file.absolutePath
+                    }
+                }
+            }
+            null
+        }
+
+    /** Nome do arquivo em cache (deterministico, reaproveitado entre sessoes). */
+    private fun cacheFile(context: Context, console: Console, title: String): File {
+        val dir = File(context.filesDir, "covers/${console.id}").apply { mkdirs() }
+        val key = Integer.toHexString("$console:$title".hashCode())
+        return File(dir, "$key.jpg")
+    }
+
+    private fun encode(value: String): String =
+        URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+
+    private fun exists(url: String): Boolean = try {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "HEAD"
+            connectTimeout = TIMEOUT_MS
+            readTimeout = TIMEOUT_MS
+            setRequestProperty("User-Agent", "RetroBox/1.0")
+        }
+        val code = connection.responseCode
+        connection.disconnect()
+        if (code == 200) true else false
+    } catch (e: Exception) {
+        Log.w(TAG, "HEAD falhou: $url (${e.message})")
+        false
+    }
+
+    private fun download(url: String, target: File): Boolean = try {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = TIMEOUT_MS
+            readTimeout = TIMEOUT_MS
+            setRequestProperty("User-Agent", "RetroBox/1.0")
+        }
+        if (connection.responseCode != 200) {
+            connection.disconnect()
+            false
+        } else {
+            val tmp = File(target.parentFile, target.name + ".part")
+            connection.inputStream.use { input ->
+                tmp.outputStream().use { output -> input.copyTo(output) }
+            }
+            connection.disconnect()
+            val bitmap = BitmapFactory.decodeFile(tmp.absolutePath)
+            if (bitmap == null) {
+                tmp.delete()
+                false
+            } else {
+                // reduz a imagem para o card da grade (as box arts tem ~600 KB)
+                val scaled = if (bitmap.width > MAX_WIDTH) {
+                    val ratio = MAX_WIDTH.toFloat() / bitmap.width
+                    Bitmap.createScaledBitmap(bitmap, MAX_WIDTH, (bitmap.height * ratio).toInt(), true)
+                } else {
+                    bitmap
+                }
+                target.outputStream().use { out ->
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                }
+                if (scaled !== bitmap) scaled.recycle()
+                bitmap.recycle()
+                tmp.delete()
+                target.length() > 0L
+            }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "download falhou: $url (${e.message})")
+        false
+    }
+}

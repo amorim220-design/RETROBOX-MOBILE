@@ -7,10 +7,11 @@ import com.retrobox.data.GameRepository
 import com.retrobox.data.UserPreferencesRepository
 
 class RetroBoxApplication : Application() {
-    val database by lazy { 
+    val database by lazy {
         Room.databaseBuilder(this, AppDatabase::class.java, "retrobox_database")
+            .addMigrations(AppDatabase.MIGRATION_1_2)
             .fallbackToDestructiveMigration()
-            .build() 
+            .build()
     }
     val gameRepository by lazy { GameRepository(database.gameDao()) }
     val userPreferencesRepository by lazy { UserPreferencesRepository(this) }

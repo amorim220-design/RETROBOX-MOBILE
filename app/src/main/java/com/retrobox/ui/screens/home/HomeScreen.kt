@@ -9,13 +9,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -53,6 +56,36 @@ fun HomeScreen(viewModel: HomeViewModel) {
         }
     }
 
+    // Importa uma pasta inteira (uma subpasta por console)
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            viewModel.importFolder(context, uri)
+        }
+    }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        // importa automaticamente o que estiver na pasta do app
+        viewModel.importFromAppFolder(context)
+    }
+    LaunchedEffect(Unit) {
+        viewModel.refreshMissingCovers(context)
+    }
+    LaunchedEffect(Unit) {
+        viewModel.message.collect { message ->
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -72,17 +105,31 @@ fun HomeScreen(viewModel: HomeViewModel) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    filePickerLauncher.launch(arrayOf("*/*"))
-                },
-                containerColor = NeonBlue,
-                contentColor = BackgroundDark,
-                shape = CircleShape
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Importar Jogo")
+                FloatingActionButton(
+                    onClick = { folderPickerLauncher.launch(null) },
+                    containerColor = SurfaceDark,
+                    contentColor = NeonBlue,
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = "Importar pasta")
+                }
+                FloatingActionButton(
+                    onClick = {
+                        filePickerLauncher.launch(arrayOf("*/*"))
+                    },
+                    containerColor = NeonBlue,
+                    contentColor = BackgroundDark,
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Importar Jogo")
+                }
             }
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Box(
             modifier = Modifier

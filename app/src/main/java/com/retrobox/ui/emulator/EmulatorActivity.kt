@@ -3,16 +3,19 @@ package com.retrobox.ui.emulator
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.SurfaceTexture
 import android.os.Bundle
 import android.view.KeyEvent
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.Surface
+import android.view.TextureView
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.*
@@ -50,7 +53,9 @@ class EmulatorActivity : ComponentActivity() {
     private var showControls by mutableStateOf(true)
     private var fastForward by mutableStateOf(false)
     private var smoothFilter by mutableStateOf(true)
+    private var aspectMode by mutableStateOf(0)
     private var fps by mutableStateOf(0.0)
+    private var geometry by mutableStateOf("")
 
     private val gamepadKeys = mapOf(
         KeyEvent.KEYCODE_BUTTON_A to RetroButton.A,
@@ -67,6 +72,8 @@ class EmulatorActivity : ComponentActivity() {
         KeyEvent.KEYCODE_DPAD_DOWN to RetroButton.DOWN,
         KeyEvent.KEYCODE_DPAD_LEFT to RetroButton.LEFT,
         KeyEvent.KEYCODE_DPAD_RIGHT to RetroButton.RIGHT,
+        KeyEvent.KEYCODE_ENTER to RetroButton.START,
+        KeyEvent.KEYCODE_SPACE to RetroButton.A,
         KeyEvent.KEYCODE_ALT_LEFT to RetroButton.SELECT,
         KeyEvent.KEYCODE_ALT_RIGHT to RetroButton.START
     )
@@ -107,7 +114,7 @@ class EmulatorActivity : ComponentActivity() {
 
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { context -> createSurfaceView(context) }
+                factory = { context -> createTextureView(context) }
             )
 
             when (val current = status) {
@@ -129,6 +136,7 @@ class EmulatorActivity : ComponentActivity() {
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (fastForward) Badge("FF")
+                        if (com.retrobox.BuildConfig.DEBUG && geometry.isNotEmpty()) Badge(geometry)
                         Badge("${fps.toInt()} FPS")
                         IconButton(
                             onClick = { showMenu = true },
@@ -142,6 +150,7 @@ class EmulatorActivity : ComponentActivity() {
                     LaunchedEffect(Unit) {
                         while (status is EmulatorStatus.Running) {
                             fps = NativeEmulator.nativeGetFps()
+                            geometry = NativeEmulator.nativeGeometryInfo()
                             kotlinx.coroutines.delay(1000)
                         }
                     }
@@ -174,7 +183,7 @@ class EmulatorActivity : ComponentActivity() {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(16.dp))
-                Text("Carregando núcleo…", color = Color.White)
+                Text("Preparando o jogo…", color = Color.White)
             }
         }
     }
@@ -209,9 +218,21 @@ class EmulatorActivity : ComponentActivity() {
             contentAlignment = Alignment.Center
         ) {
             Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
-                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Jogo pausado", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
+                Column(
+                    modifier = Modifier
+                        .width(320.dp)
+                        .heightIn(max = 620.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        "Jogo pausado",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(6.dp))
 
                     MenuAction("Continuar") { showMenu = false }
                     MenuAction("Salvar estado") {
@@ -236,6 +257,16 @@ class EmulatorActivity : ComponentActivity() {
                         smoothFilter = !smoothFilter
                         NativeEmulator.nativeSetLinearFilter(smoothFilter)
                     }
+                    MenuAction(
+                        when (aspectMode) {
+                            0 -> "Aspecto: ajustar"
+                            1 -> "Aspecto: esticar"
+                            else -> "Aspecto: inteiro"
+                        }
+                    ) {
+                        aspectMode = (aspectMode + 1) % 3
+                        NativeEmulator.nativeSetAspectMode(aspectMode)
+                    }
                     MenuAction(if (showControls) "Esconder controles" else "Mostrar controles") {
                         showControls = !showControls
                         showMenu = false
@@ -252,7 +283,7 @@ class EmulatorActivity : ComponentActivity() {
     @Composable
     private fun MenuAction(label: String, onClick: () -> Unit) {
         TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Text(label, color = Color.White, modifier = Modifier.fillMaxWidth())
+            Text(label, color = Color.White)
         }
     }
 
@@ -260,26 +291,51 @@ class EmulatorActivity : ComponentActivity() {
         android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
     }
 
-    private fun createSurfaceView(context: Context): SurfaceView {
-        return SurfaceView(context).apply {
-            holder.addCallback(object : SurfaceHolder.Callback {
-                override fun surfaceCreated(holder: SurfaceHolder) {
-                    if (status is EmulatorStatus.Failed) return
+    /**
+     * A `TextureView` is used instead of a `SurfaceView` on purpose: a SurfaceView
+     * lives in its own SurfaceFlinger layer and the app window gets an input crop
+     * over that area, so the Compose overlay (on-screen gamepad) would never
+     * receive the touches. With a TextureView the video is composited inside the
+     * window and every touch reaches the UI.
+     */
+    private fun createTextureView(context: Context): TextureView {
+        return TextureView(context).apply {
+            surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+                    android.util.Log.i(
+                        "RetroBoxNative",
+                        "textureAvailable ${width}x$height display=${resources.displayMetrics}"
+                    )
+                    if (status is EmulatorStatus.Failed) {
+                        texture.release()
+                        return
+                    }
                     status = EmulatorStatus.Loading
                     startJob = lifecycleScope.launch {
-                        val error = withContext(Dispatchers.Default) { session.start(holder.surface) }
-                        status = if (error.isEmpty()) EmulatorStatus.Running else EmulatorStatus.Failed(error)
+                        val error = withContext(Dispatchers.Default) {
+                            session.start(Surface(texture))
+                        }
+                        status = if (error.isEmpty()) {
+                            EmulatorStatus.Running
+                        } else {
+                            EmulatorStatus.Failed(error)
+                        }
                     }
                 }
 
-                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+                override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) {
+                    android.util.Log.i("RetroBoxNative", "textureResized ${width}x$height")
+                }
 
-                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
                     startJob?.cancel()
                     session.stop()
                     status = EmulatorStatus.Loading
+                    return true
                 }
-            })
+
+                override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+            }
         }
     }
 

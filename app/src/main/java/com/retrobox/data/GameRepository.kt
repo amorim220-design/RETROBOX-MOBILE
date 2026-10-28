@@ -17,5 +17,13 @@ class GameRepository(private val gameDao: GameDao) {
     }
 
     suspend fun updateGame(game: Game) = gameDao.updateGame(game)
+
     suspend fun deleteGame(game: Game) = gameDao.deleteGame(game)
+
+    /** Atualiza a capa de um jogo ja cadastrado. */
+    suspend fun updateCover(filePath: String, coverUri: String) {
+        gameDao.getGameByPath(filePath)?.let { game ->
+            gameDao.updateGame(game.copy(coverUri = coverUri))
+        }
+    }
 }

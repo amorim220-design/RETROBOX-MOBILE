@@ -7,14 +7,39 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include "libretro_api.h"
+#include "libretro.h"
 
 namespace retrobox {
+
+/* Ponteiros das funcoes exportadas por cada nucleo libretro (.so) */
+typedef void (*fn_init)(void);
+typedef void (*fn_deinit)(void);
+typedef unsigned (*fn_api_version)(void);
+typedef void (*fn_get_system_info)(struct retro_system_info *);
+typedef void (*fn_get_system_av_info)(struct retro_system_av_info *);
+typedef void (*fn_set_environment)(retro_environment_t);
+typedef void (*fn_set_video_refresh)(retro_video_refresh_t);
+typedef void (*fn_set_audio_sample)(retro_audio_sample_t);
+typedef size_t (*fn_set_audio_sample_batch)(retro_audio_sample_batch_t);
+typedef void (*fn_set_input_poll)(retro_input_poll_t);
+typedef void (*fn_set_input_state)(retro_input_state_t);
+typedef bool (*fn_load_game)(const struct retro_game_info *);
+typedef void (*fn_unload_game)(void);
+typedef void (*fn_run)(void);
+typedef void (*fn_reset)(void);
+typedef size_t (*fn_serialize_size)(void);
+typedef bool (*fn_serialize)(void *, size_t);
+typedef bool (*fn_unserialize)(const void *, size_t);
+typedef void *(*fn_get_memory_data)(unsigned);
+typedef size_t (*fn_get_memory_size)(unsigned);
+typedef void (*fn_set_controller_port_device)(unsigned, unsigned);
 
 // ---------------------------------------------------------------------------
 // Audio: AAudio output fed by a lock-free ring buffer written by the core.
@@ -67,6 +92,10 @@ public:
 
     int surfaceWidth() const { return surfaceW_; }
     int surfaceHeight() const { return surfaceH_; }
+    // The window can be resized at any time (rotation, multi-window, inset
+    // changes), so the EGL surface is re-measured before every present.
+    void refreshSurfaceSize();
+    std::string geometryInfo() const;
 
 private:
     bool createContext(ANativeWindow *window);
@@ -74,6 +103,7 @@ private:
     bool createFbo(unsigned width, unsigned height, bool depth, bool stencil);
     void drawQuad(bool flipVertical);
     void computeViewport(unsigned frameW, unsigned frameH, int *outX, int *outY, int *outW, int *outH);
+    void applyViewport(unsigned frameW, unsigned frameH);
 
     EGLDisplay display_ = EGL_NO_DISPLAY;
     EGLSurface surface_ = EGL_NO_SURFACE;
@@ -96,6 +126,9 @@ private:
 
     unsigned texWidth_ = 0;
     unsigned texHeight_ = 0;
+    GLenum texFormat_ = 0;
+    GLenum texType_ = 0;
+    std::vector<uint8_t> uploadBuffer_;
     unsigned fboWidth_ = 0;
     unsigned fboHeight_ = 0;
 
@@ -107,6 +140,11 @@ private:
     unsigned hwMaxHeight_ = 0;
     int glMajor_ = 3;
     int glMinor_ = 0;
+
+    int lastVx_ = -1;
+    int lastVy_ = -1;
+    int lastVw_ = -1;
+    int lastVh_ = -1;
 
     GLint uTexture_ = -1;
     GLint aPosition_ = -1;
@@ -121,6 +159,7 @@ public:
     static Emulator &instance();
 
     void setDirectories(const std::string &systemDir, const std::string &saveDir);
+    void setLanguage(const std::string &language) { language_ = language; }
     bool loadCore(const std::string &corePath, std::string *error);
     void unloadCore();
 
@@ -142,6 +181,7 @@ public:
     void setFastForward(bool enabled) { fastForward_ = enabled; }
     bool isLoaded() const { return gameLoaded_; }
     std::string systemInfo() const;
+    std::string geometryInfo() const;
     std::string lastError() const { return lastError_; }
     double measuredFps() const { return measuredFps_.load(); }
     void setLinearFilter(bool linear);
@@ -220,6 +260,16 @@ private:
     retro_system_av_info avInfo_{};
     retro_hw_render_callback hwRender_{};
     bool ownsHwRender_ = false;
+
+    /* variaveis e opcoes do core (libretro) */
+    std::map<std::string, std::string> variables_;
+    std::map<std::string, std::string> coreOptions_;
+    std::string language_ = "English";
+    bool needFullPath_ = true;
+    retro_audio_buffer_status_callback_t audioBufferCallback_ = nullptr;
+    unsigned audioBufferInterval_ = 1;
+    unsigned audioBufferCounter_ = 0;
+    std::set<unsigned> loggedCommands_;
 };
 
 } // namespace retrobox

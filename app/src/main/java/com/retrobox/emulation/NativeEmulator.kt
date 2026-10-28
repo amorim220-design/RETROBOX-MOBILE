@@ -13,6 +13,7 @@ object NativeEmulator {
     }
 
     external fun nativeSetDirectories(systemDir: String, saveDir: String): Boolean
+    external fun nativeSetLanguage(language: String)
     external fun nativeLoadCore(corePath: String): String?
     external fun nativeUnloadCore()
 
@@ -33,6 +34,7 @@ object NativeEmulator {
     external fun nativeLoadState(data: ByteArray): Boolean
 
     external fun nativeGetFps(): Double
+    external fun nativeGeometryInfo(): String
     external fun nativeSystemInfo(): String
 }
 

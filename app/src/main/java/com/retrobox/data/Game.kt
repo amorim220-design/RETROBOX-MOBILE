@@ -13,5 +13,7 @@ data class Game(
     val coverUri: String? = null,
     val isFavorite: Boolean = false,
     val lastPlayed: Long? = null,
-    val dateAdded: Long = System.currentTimeMillis()
+    val dateAdded: Long = System.currentTimeMillis(),
+    /** Nome original do arquivo (usado para procurar a capa e exibir as tags). */
+    val rawTitle: String? = null
 )

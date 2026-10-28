@@ -4,7 +4,7 @@ project(retrobox CXX)
 
 add_library(retrobox SHARED
         retrobox.h
-        libretro_api.h
+        libretro.h
         emulator.cpp
         jni_bridge.cpp)
 
@@ -21,7 +21,15 @@ find_library(dl-lib dl)
 # The NDK ships libc++ for the *target* inside the sysroot; find_library() would
 # resolve the host copies from toolchains/llvm/prebuilt/<host>/lib, so point at
 # the target archives explicitly.
-set(CXX_TRIPLE "aarch64-linux-android")
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(CXX_TRIPLE "aarch64-linux-android")
+elseif(ANDROID_ABI STREQUAL "x86_64")
+    set(CXX_TRIPLE "x86_64-linux-android")
+elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+    set(CXX_TRIPLE "arm-linux-androideabi")
+else()
+    set(CXX_TRIPLE "i686-linux-android")
+endif()
 set(CXX_STATIC "${CMAKE_SYSROOT}/usr/lib/${CXX_TRIPLE}/libc++_static.a")
 set(CXX_ABI "${CMAKE_SYSROOT}/usr/lib/${CXX_TRIPLE}/libc++abi.a")
 if(NOT EXISTS "${CXX_STATIC}")

@@ -246,6 +246,7 @@ void Renderer::destroy() {
     window_ = nullptr;
     program_ = vbo_ = texture_ = fbo_ = fboTexture_ = fboDepth_ = 0;
     texWidth_ = texHeight_ = 0;
+    texFormat_ = texType_ = 0;
     fboWidth_ = fboHeight_ = 0;
 }
 
@@ -366,6 +367,26 @@ void Renderer::contextReset() {
     createFbo(hwMaxWidth_, hwMaxHeight_, hwDepth_, hwStencil_);
 }
 
+void Renderer::refreshSurfaceSize() {
+    if (display_ == EGL_NO_DISPLAY || surface_ == EGL_NO_SURFACE) return;
+    EGLint w = 0;
+    EGLint h = 0;
+    if (!eglQuerySurface(display_, surface_, EGL_WIDTH, &w)) return;
+    if (!eglQuerySurface(display_, surface_, EGL_HEIGHT, &h)) return;
+    if (w != surfaceW_ || h != surfaceH_) {
+        LOGI("surface resized: %dx%d -> %dx%d", surfaceW_, surfaceH_, w, h);
+        surfaceW_ = w;
+        surfaceH_ = h;
+    }
+}
+
+std::string Renderer::geometryInfo() const {
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer), "%dx%d view %dx%d @ %d,%d", surfaceW_, surfaceH_,
+             lastVw_, lastVh_, lastVx_, lastVy_);
+    return std::string(buffer);
+}
+
 void Renderer::computeViewport(unsigned frameW, unsigned frameH, int *outX, int *outY, int *outW,
                                int *outH) {
     if (surfaceW_ <= 0 || surfaceH_ <= 0) {
@@ -384,6 +405,21 @@ void Renderer::computeViewport(unsigned frameW, unsigned frameH, int *outX, int 
         return;
     }
 
+    if (aspectMode_ == 2 && frameW > 0 && frameH > 0) {
+        // Integer scaling: keep the pixel grid sharp.
+        int scale = surfaceW_ / static_cast<int>(frameW);
+        int scaleY = surfaceH_ / static_cast<int>(frameH);
+        if (scaleY < scale) scale = scaleY;
+        if (scale < 1) scale = 1;
+        int w = static_cast<int>(frameW) * scale;
+        int h = static_cast<int>(frameH) * scale;
+        *outX = (surfaceW_ - w) / 2;
+        *outY = (surfaceH_ - h) / 2;
+        *outW = w;
+        *outH = h;
+        return;
+    }
+
     int w;
     int h;
     if (srcAspect > dstAspect) {
@@ -397,6 +433,28 @@ void Renderer::computeViewport(unsigned frameW, unsigned frameH, int *outX, int 
     *outY = (surfaceH_ - h) / 2;
     *outW = w;
     *outH = h;
+}
+
+void Renderer::applyViewport(unsigned frameW, unsigned frameH) {
+    refreshSurfaceSize();
+
+    int vx, vy, vw, vh;
+    computeViewport(frameW, frameH, &vx, &vy, &vw, &vh);
+
+    if (vx != lastVx_ || vy != lastVy_ || vw != lastVw_ || vh != lastVh_) {
+        LOGI("viewport %dx%d at %d,%d (surface %dx%d, frame %ux%u)", vw, vh, vx, vy, surfaceW_,
+             surfaceH_, frameW, frameH);
+        lastVx_ = vx;
+        lastVy_ = vy;
+        lastVw_ = vw;
+        lastVh_ = vh;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(vx, vy, vw, vh);
+    glDisable(GL_SCISSOR_TEST);
+    glClearColor(0.f, 0.f, 0.f, 1.f);
+    glClear(GL_COLOR_BUFFER_BIT);
 }
 
 void Renderer::drawQuad(bool flipVertical) {
@@ -434,22 +492,29 @@ void Renderer::drawQuad(bool flipVertical) {
 void Renderer::presentSoftware(const void *data, unsigned width, unsigned height, size_t pitch) {
     if (data == nullptr || display_ == EGL_NO_DISPLAY) return;
 
+    // OpenGL ES is strict about the internal format: RGB565 data needs the
+    // GL_RGB565 internal format (GL_RGBA + GL_UNSIGNED_SHORT_5_6_5 is rejected
+    // with GL_INVALID_OPERATION).
+    GLenum internalFormat = GL_RGBA;
     GLenum format = GL_RGBA;
     GLenum type = GL_UNSIGNED_BYTE;
     size_t bytesPerPixel = 4;
     switch (pixelFormat_) {
         case RETRO_PIXEL_FORMAT_0RGB1555:
+            internalFormat = GL_RGBA;
             format = GL_RGBA;
             type = GL_UNSIGNED_SHORT_5_5_5_1;
             bytesPerPixel = 2;
             break;
         case RETRO_PIXEL_FORMAT_RGB565:
-            format = GL_RGBA;
+            internalFormat = GL_RGB565;
+            format = GL_RGB;
             type = GL_UNSIGNED_SHORT_5_6_5;
             bytesPerPixel = 2;
             break;
         case RETRO_PIXEL_FORMAT_XRGB8888:
         default:
+            internalFormat = GL_RGBA;
             format = GL_RGBA;
             type = GL_UNSIGNED_BYTE;
             bytesPerPixel = 4;
@@ -458,29 +523,74 @@ void Renderer::presentSoftware(const void *data, unsigned width, unsigned height
 
     if (width == 0 || height == 0) return;
 
-    glBindTexture(GL_TEXTURE_2D, texture_);
-    if (width != texWidth_ || height != texHeight_ || texture_ == 0) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLint>(width), static_cast<GLint>(height),
-                     0, format, type, data);
-        texWidth_ = width;
-        texHeight_ = height;
-    } else {
-        if (pitch != width * bytesPerPixel) {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(pitch / bytesPerPixel));
-        } else {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    const size_t rowBytes = static_cast<size_t>(width) * bytesPerPixel;
+
+    // Some cores report a pitch larger than the visible width (they keep a
+    // fixed stride). GL_UNPACK_ROW_LENGTH is not handled consistently by every
+    // driver, so the rows are copied into a tightly packed buffer instead.
+    const void *pixels = data;
+    if (pitch != rowBytes) {
+        uploadBuffer_.resize(rowBytes * height);
+        const uint8_t *src = static_cast<const uint8_t *>(data);
+        uint8_t *dst = uploadBuffer_.data();
+        for (unsigned row = 0; row < height; ++row) {
+            std::memcpy(dst + static_cast<size_t>(row) * rowBytes,
+                        src + static_cast<size_t>(row) * pitch, rowBytes);
         }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLint>(width), static_cast<GLint>(height),
-                        format, type, data);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        pixels = uploadBuffer_.data();
     }
 
-    int vx, vy, vw, vh;
-    computeViewport(width, height, &vx, &vy, &vw, &vh);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(vx, vy, vw, vh);
-    glClearColor(0.f, 0.f, 0.f, 1.f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glBindTexture(GL_TEXTURE_2D, texture_);
+    bool recreate = texture_ == 0 || width != texWidth_ || height != texHeight_ ||
+                    internalFormat != texFormat_ || type != texType_;
+    if (recreate) {
+        // Sized internal formats (GL_RGB565) make the texture immutable in ES3,
+        // so a size change needs a brand new texture object.
+        if (texture_ != 0) {
+            glDeleteTextures(1, &texture_);
+            texture_ = 0;
+        }
+        glGenTextures(1, &texture_);
+        glBindTexture(GL_TEXTURE_2D, texture_);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear_ ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear_ ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLint>(width),
+                     static_cast<GLint>(height), 0, format, type, pixels);
+        texWidth_ = width;
+        texHeight_ = height;
+        texFormat_ = internalFormat;
+        texType_ = type;
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLint>(width),
+                        static_cast<GLint>(height), format, type, pixels);
+    }
+
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        LOGE("texture upload failed (0x%x) %ux%u pitch=%zu type=0x%x - recreating", error,
+             width, height, pitch, type);
+        if (texture_ != 0) {
+            glDeleteTextures(1, &texture_);
+            texture_ = 0;
+        }
+        glGenTextures(1, &texture_);
+        glBindTexture(GL_TEXTURE_2D, texture_);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear_ ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear_ ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, static_cast<GLint>(width),
+                     static_cast<GLint>(height), 0, format, type, pixels);
+        texWidth_ = width;
+        texHeight_ = height;
+        texFormat_ = internalFormat;
+        texType_ = type;
+        glGetError();
+    }
+
+    applyViewport(width, height);
     drawQuad(false);
     eglSwapBuffers(display_, surface_);
 }
@@ -491,13 +601,7 @@ void Renderer::presentHardware(unsigned width, unsigned height) {
     if (width == 0) width = fboWidth_;
     if (height == 0) height = fboHeight_;
 
-    int vx, vy, vw, vh;
-    computeViewport(width, height, &vx, &vy, &vw, &vh);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(vx, vy, vw, vh);
-    glClearColor(0.f, 0.f, 0.f, 1.f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    applyViewport(width, height);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, fboTexture_);
@@ -660,6 +764,7 @@ bool Emulator::loadCore(const std::string &corePath, std::string *error) {
 
     retro_system_info info{};
     getSystemInfo_(&info);
+    needFullPath_ = info.need_fullpath;
     LOGI("core loaded: %s %s (need_fullpath=%d)", info.library_name ? info.library_name : "?",
          info.library_version ? info.library_version : "?", info.need_fullpath);
     return true;
@@ -747,6 +852,29 @@ void Emulator::runLoop() {
     game.size = 0;
     game.meta = nullptr;
 
+    // Cores com need_fullpath == 0 esperam os dados da ROM em memoria.
+    // Sem isso o core fica com tamanho 0 e divide por zero (SIGFPE).
+    std::vector<uint8_t> romData;
+    if (!needFullPath_) {
+        FILE *file = std::fopen(romPath_.c_str(), "rb");
+        if (file != nullptr) {
+            std::fseek(file, 0, SEEK_END);
+            long size = std::ftell(file);
+            std::fseek(file, 0, SEEK_SET);
+            if (size > 0) {
+                romData.resize(static_cast<size_t>(size));
+                size_t read = std::fread(romData.data(), 1, romData.size(), file);
+                romData.resize(read);
+            }
+            std::fclose(file);
+            game.data = romData.data();
+            game.size = romData.size();
+            LOGI("rom em memoria: %zu bytes", romData.size());
+        } else {
+            LOGE("nao foi possivel abrir a rom: %s", romPath_.c_str());
+        }
+    }
+
     if (!loadGameFn_(&game)) {
         if (deinit_ != nullptr) deinit_();
         renderer_.destroy();
@@ -778,6 +906,14 @@ void Emulator::runLoop() {
         runFn_();
         frames++;
 
+        // avisa o core que o buffer de audio tem espaco (evita travamento)
+        if (audioBufferCallback_ != nullptr) {
+            if (++audioBufferCounter_ >= audioBufferInterval_) {
+                audioBufferCounter_ = 0;
+                audioBufferCallback_(true, 0, false);
+            }
+        }
+
         if (fastForward_) continue;
 
         auto now = clock::now();
@@ -788,6 +924,12 @@ void Emulator::runLoop() {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - fpsWindow).count();
         if (elapsed >= 1000) {
             measuredFps_.store(frames * 1000.0 / static_cast<double>(elapsed));
+            static int report = 0;
+            if (report < 3) {
+                LOGI("loop: %d quadros em %lld ms (fps %.1f)", frames,
+                     static_cast<long long>(elapsed), measuredFps_.load());
+                report++;
+            }
             frames = 0;
             fpsWindow = now;
         }
@@ -842,6 +984,11 @@ int16_t Emulator::inputState(unsigned port, unsigned device, unsigned index, uns
 }
 
 void Emulator::videoRefresh(const void *data, unsigned width, unsigned height, size_t pitch) {
+    static int frames = 0;
+    if (frames < 3) {
+        LOGI("video refresh: %ux%u pitch=%zu data=%p", width, height, pitch, data);
+        frames++;
+    }
     if (renderer_.hwActive() && data == RETRO_HW_FRAME_BUFFER_VALID) {
         renderer_.presentHardware(width, height);
         return;
@@ -860,14 +1007,171 @@ void Emulator::audioSample(int16_t left, int16_t right) {
     audio_.push(frame, 1);
 }
 
+namespace {
+
+// O layout de retro_core_option_v2_definition mudou entre versoes do
+// libretro.h (values como ponteiro -> array fixo). Detectamos em runtime
+// validando os ponteiros antes de usa-los.
+inline bool plausiblePtr(const void *p) {
+    if (p == nullptr) return true;
+    uintptr_t v = reinterpret_cast<uintptr_t>(p);
+    return v >= 0x1000 && v < 0x7fffffffffffULL && (v % 2 == 0);
+}
+
+inline bool plausibleStr(const char *s) {
+    if (s == nullptr) return true;
+    if (!plausiblePtr(s)) return false;
+    for (int i = 0; i < 24; ++i) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c == 0) return true;
+        if (c < 0x20 || c > 0x7e) return false;
+    }
+    return false;
+}
+
+} // namespace
+
 bool Emulator::environment(unsigned cmd, void *data) {
-    switch (cmd) {
+    // Sem log por chamada: alguns cores consultam o ambiente a cada quadro e
+    // isso estoura o buffer do logcat.
+    const unsigned base = cmd & ~static_cast<unsigned>(RETRO_ENVIRONMENT_EXPERIMENTAL);
+
+    // Comandos que nao usam (ou podem nao ter) o ponteiro de dados.
+    switch (base) {
+        case RETRO_ENVIRONMENT_SHUTDOWN:
+            stopRequested_ = true;
+            return true;
+        case RETRO_ENVIRONMENT_SET_VARIABLES: {
+            auto *vars = static_cast<const retro_variable *>(data);
+            if (vars == nullptr) return true;
+            for (const retro_variable *var = vars; var->key != nullptr && var->value != nullptr; ++var) {
+                variables_[var->key] = var->value;
+            }
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_AUDIO_BUFFER_STATUS_CALLBACK: {
+            // O core usa este callback para saber quando o buffer de audio tem
+            // espaco; sem ele o Snes9x fica esperando e a emulacao trava.
+            // data == NULL significa "desregistrar".
+            auto *cb = static_cast<retro_audio_buffer_status_callback *>(data);
+            audioBufferCallback_ = (cb != nullptr) ? cb->callback : nullptr;
+            audioBufferInterval_ = 1;
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS:
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL: {
+            // formato v1: key, desc, info, values*, default_value
+            struct OptionV1 {
+                const char *key;
+                const char *desc;
+                const char *info;
+                retro_core_option_value *values;
+                const char *default_value;
+            };
+            auto *definitions = static_cast<const OptionV1 *>(data);
+            if (definitions == nullptr) return true;
+            for (int i = 0; i < 128; ++i) {
+                const OptionV1 *def = &definitions[i];
+                if (def->key == nullptr) break;
+                if (!plausibleStr(def->key) || !plausibleStr(def->default_value)) break;
+                std::string value = def->default_value != nullptr ? def->default_value : "";
+                if (value.empty() && def->values != nullptr && plausibleStr(def->values[0].value)) {
+                    value = def->values[0].value;
+                }
+                coreOptions_[def->key] = value;
+                variables_[def->key] = value;
+                LOGI("opcao v1: %s = %s", def->key, value.c_str());
+            }
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2:
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: {
+            // Tenta primeiro o layout antigo (values como ponteiro) e depois o
+            // novo (values como array fixo). A validacao dos ponteiros
+            // descarta o layout errado.
+            struct OptionV2Old {
+                const char *key;
+                const char *desc;
+                const char *info;
+                const char *category_key;
+                retro_core_option_value *values;
+                const char *default_value;
+            };
+            struct OptionV2New {
+                const char *key;
+                const char *desc;
+                const char *desc_categorized;
+                const char *info;
+                const char *info_categorized;
+                const char *category_key;
+                retro_core_option_value values[RETRO_NUM_CORE_OPTION_VALUES_MAX];
+                const char *default_value;
+            };
+
+            const char *base = static_cast<const char *>(data);
+            if (base == nullptr) return true;
+
+            auto readOld = [&](int index) -> const OptionV2Old * {
+                return reinterpret_cast<const OptionV2Old *>(base) + index;
+            };
+
+            bool oldLayout = false;
+            const OptionV2Old *first = readOld(0);
+            if (first->key != nullptr && plausibleStr(first->key) &&
+                plausibleStr(first->default_value) &&
+                (first->values == nullptr || plausibleStr(first->values[0].value))) {
+                oldLayout = true;
+            }
+
+            if (oldLayout) {
+                for (int i = 0; i < 128; ++i) {
+                    const OptionV2Old *def = readOld(i);
+                    if (def->key == nullptr) break;
+                    if (!plausibleStr(def->key) || !plausibleStr(def->default_value)) break;
+                    std::string value = def->default_value != nullptr ? def->default_value : "";
+                    if (value.empty() && def->values != nullptr && plausibleStr(def->values[0].value)) {
+                        value = def->values[0].value;
+                    }
+                    coreOptions_[def->key] = value;
+                    variables_[def->key] = value;
+                    LOGI("opcao v2: %s = %s", def->key, value.c_str());
+                }
+            } else {
+                auto *definitions = reinterpret_cast<const OptionV2New *>(base);
+                for (int i = 0; i < 128; ++i) {
+                    const OptionV2New *def = &definitions[i];
+                    if (def->key == nullptr) break;
+                    if (!plausibleStr(def->key) || !plausibleStr(def->default_value)) break;
+                    std::string value = def->default_value != nullptr ? def->default_value : "";
+                    coreOptions_[def->key] = value;
+                    variables_[def->key] = value;
+                    LOGI("opcao v2 (novo layout): %s = %s", def->key, value.c_str());
+                }
+            }
+            return true;
+        }
+        default:
+            break;
+    }
+
+    // Qualquer outro comando pode vir sem dados (o core do Snes9x chama
+    // GET_INPUT_BITMASKS com data == NULL) - nunca desreferencie.
+    if (data == nullptr) {
+        if (loggedCommands_.find(base | 0x80000000u) == loggedCommands_.end()) {
+            loggedCommands_.insert(base | 0x80000000u);
+            LOGI("env cmd=%u ignorado (sem dados)", base);
+        }
+        return false;
+    }
+
+    switch (base) {
         case RETRO_ENVIRONMENT_GET_CAN_DUPE:
             *static_cast<bool *>(data) = true;
             return true;
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: {
             auto format = *static_cast<const retro_pixel_format *>(data);
             renderer_.setPixelFormat(format);
+            LOGI("pixel format %d", static_cast<int>(format));
             return true;
         }
         case RETRO_ENVIRONMENT_SET_HW_RENDER: {
@@ -887,10 +1191,10 @@ bool Emulator::environment(unsigned cmd, void *data) {
             cb->get_current_framebuffer = []() -> uintptr_t {
                 return instance().renderer_.currentFramebuffer();
             };
-            cb->get_proc_address = [](const char *sym) -> void * {
+            cb->get_proc_address = [](const char *sym) -> retro_proc_address_t {
                 void *proc = reinterpret_cast<void *>(eglGetProcAddress(sym));
                 if (proc == nullptr) proc = dlsym(RTLD_DEFAULT, sym);
-                return proc;
+                return reinterpret_cast<retro_proc_address_t>(proc);
             };
             cb->context_reset = []() { instance().renderer_.contextReset(); };
             hwRender_ = *cb;
@@ -927,17 +1231,38 @@ bool Emulator::environment(unsigned cmd, void *data) {
             return true;
         case RETRO_ENVIRONMENT_GET_VARIABLE: {
             auto *var = static_cast<retro_variable *>(data);
-            if (var != nullptr) var->value = nullptr;
-            return false;
-        }
-        case RETRO_ENVIRONMENT_SET_VARIABLES:
+            if (var->key == nullptr) return false;
+            auto it = variables_.find(var->key);
+            if (it == variables_.end()) {
+                if (loggedCommands_.find(0x1000) == loggedCommands_.end()) {
+                    loggedCommands_.insert(0x1000);
+                    LOGI("variavel desconhecida: %s", var->key);
+                }
+                var->value = nullptr;
+                return false;
+            }
+            var->value = it->second.c_str();
             return true;
+        }
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
             *static_cast<bool *>(data) = false;
             return true;
         case RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION:
+            // Usamos apenas a API legada de variaveis (retro_variable), cujo
+            // layout e estavel. A v2 de core options muda de layout entre
+            // versoes do libretro.h e quebraria o parsing.
             *static_cast<unsigned *>(data) = 0;
             return true;
+        case RETRO_ENVIRONMENT_GET_LANGUAGE: {
+            // o core usa o idioma para escolher a regiao (ex.: Snes9x divide por zero
+            // quando o idioma nao e informado)
+            *static_cast<const char **>(data) = language_.c_str();
+            return true;
+        }
+        case RETRO_ENVIRONMENT_GET_USERNAME: {
+            *static_cast<const char **>(data) = "RetroBox";
+            return true;
+        }
         case RETRO_ENVIRONMENT_GET_INPUT_BITMASKS:
             *static_cast<bool *>(data) = false;
             return true;
@@ -950,10 +1275,17 @@ bool Emulator::environment(unsigned cmd, void *data) {
         case RETRO_ENVIRONMENT_GET_TARGET_REFRESH_RATE:
             *static_cast<float *>(data) = 60.0f;
             return true;
+        case RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY:
+            return true;
         case RETRO_ENVIRONMENT_SHUTDOWN:
             stopRequested_ = true;
             return true;
         default:
+            // comandos desconhecidos sao ignorados (log unico por comando)
+            if (loggedCommands_.find(base) == loggedCommands_.end()) {
+                loggedCommands_.insert(base);
+                LOGI("env: comando nao suportado %u", base);
+            }
             return false;
     }
 }
@@ -982,6 +1314,8 @@ void Emulator::reset() {
 void Emulator::setLinearFilter(bool linear) { renderer_.setLinearFilter(linear); }
 
 void Emulator::setAspectMode(int mode) { renderer_.setAspectMode(mode); }
+
+std::string Emulator::geometryInfo() const { return renderer_.geometryInfo(); }
 
 std::string Emulator::systemInfo() const {
     if (lib_ == nullptr || getSystemInfo_ == nullptr) return "";

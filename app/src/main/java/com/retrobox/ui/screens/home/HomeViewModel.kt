@@ -10,6 +10,9 @@ import com.retrobox.data.Game
 import com.retrobox.data.GameRepository
 import com.retrobox.data.UserPreferencesRepository
 import com.retrobox.domain.Console
+import com.retrobox.emulation.CoverStore
+import com.retrobox.emulation.GameTitle
+import com.retrobox.emulation.LibraryImporter
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -57,20 +60,95 @@ class HomeViewModel(
     fun importGame(context: Context, uri: Uri, console: Console) {
         viewModelScope.launch {
             val fileName = getFileName(context, uri) ?: "Unknown Game"
-            val title = fileName.substringBeforeLast(".")
+            val title = GameTitle.clean(fileName)
             val detected = Console.fromFileName(fileName) ?: console
             val game = Game(
                 title = title,
                 console = detected,
                 filePath = uri.toString(),
-                coverUri = null
+                coverUri = null,
+                rawTitle = fileName
             )
             gameRepository.addGame(game)
             _selectedConsole.value = detected
             userPreferencesRepository.updateLastConsole(detected)
             _message.emit("$title adicionado em ${detected.displayName}")
+
+            // tenta buscar a capa na internet (silencioso se nao houver rede)
+            CoverStore.coverFor(context, detected, fileName)?.let { cover ->
+                gameRepository.updateCover(uri.toString(), cover)
+            }
         }
     }
+
+    /**
+     * Importa uma pasta inteira (uma subpasta por console) para a biblioteca.
+     */
+    fun importFolder(context: Context, treeUri: Uri) {
+        if (isImporting) return
+        isImporting = true
+        viewModelScope.launch {
+            _message.emit("Importando jogos…")
+            val result = LibraryImporter.importTree(
+                context = context,
+                treeUri = treeUri,
+                repository = gameRepository
+            ) { current, total, label ->
+                _message.tryEmit("Importando $current/$total — $label")
+            }
+            isImporting = false
+
+            val summary = buildString {
+                append("${result.imported} jogo(s) importado(s)")
+                if (result.withCover > 0) append(", ${result.withCover} com capa")
+                if (result.skipped > 0) append(", ${result.skipped} ignorado(s)")
+            }
+            _message.emit(summary)
+            result.errors.take(3).forEach { _message.emit(it) }
+        }
+    }
+
+    private var isImporting = false
+
+    /**
+     * Importa da pasta /Android/data/<app>/files/JOGOS do proprio aparelho.
+     * Nao precisa de permissao nem do seletor de arquivos: e o jeito mais
+     * simples de colocar as ROMs no celular (via USB ou explorador de arquivos).
+     */
+    fun importFromAppFolder(context: Context) {
+        if (isImporting) return
+        isImporting = true
+        viewModelScope.launch {
+            val result = LibraryImporter.importAppFolder(context, gameRepository) { current, total, label ->
+                _message.tryEmit("Importando $current/$total — $label")
+            }
+            isImporting = false
+            if (result.imported > 0) {
+                _message.emit("${result.imported} jogo(s) da pasta do app" +
+                    if (result.withCover > 0) ", ${result.withCover} com capa" else "")
+            }
+        }
+    }
+
+    /**
+     * Busca as capas que faltam (jogos importados antes, ou que falharam por
+     * falta de rede). Só uma vez por sessão.
+     */
+    fun refreshMissingCovers(context: Context) {
+        if (coversRefreshed) return
+        coversRefreshed = true
+        viewModelScope.launch {
+            val pending = gameRepository.allGames.first()
+                .filter { it.coverUri == null && !it.rawTitle.isNullOrBlank() }
+            if (pending.isEmpty()) return@launch
+            pending.forEach { game ->
+                val cover = CoverStore.coverFor(context, game.console, game.rawTitle!!)
+                if (cover != null) gameRepository.updateCover(game.filePath, cover)
+            }
+        }
+    }
+
+    private var coversRefreshed = false
 
     private val _message = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val message: SharedFlow<String> = _message

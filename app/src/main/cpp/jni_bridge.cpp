@@ -38,6 +38,11 @@ Java_com_retrobox_emulation_NativeEmulator_nativeLoadCore(JNIEnv *env, jobject, 
     return nullptr;
 }
 
+JNIEXPORT void JNICALL
+Java_com_retrobox_emulation_NativeEmulator_nativeSetLanguage(JNIEnv *env, jobject, jstring language) {
+    Emulator::instance().setLanguage(jstringToStd(env, language));
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_retrobox_emulation_NativeEmulator_nativeSetSurface(JNIEnv *env, jobject, jobject surface,
                                                             jint pixelFormat) {
@@ -124,6 +129,12 @@ Java_com_retrobox_emulation_NativeEmulator_nativeSetLinearFilter(JNIEnv *, jobje
 JNIEXPORT void JNICALL
 Java_com_retrobox_emulation_NativeEmulator_nativeSetAspectMode(JNIEnv *, jobject, jint mode) {
     Emulator::instance().setAspectMode(mode);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_retrobox_emulation_NativeEmulator_nativeGeometryInfo(JNIEnv *env, jobject) {
+    std::string info = Emulator::instance().geometryInfo();
+    return env->NewStringUTF(info.c_str());
 }
 
 JNIEXPORT jstring JNICALL
