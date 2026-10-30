@@ -699,7 +699,7 @@ class EmulatorActivity : ComponentActivity() {
 
         // Controle físico (USB/Bluetooth): avisa qual controle entrou e em que
         // jogador ele ficou.
-        val port = portForDevice(event.deviceId, event.source)
+        val port = 0  // single-player por padrão; multi-jogador é feito via perfil
         val pressed = event.action == KeyEvent.ACTION_DOWN
         if (pressed) {
             announceGamepad(event.deviceId, port)
@@ -717,7 +717,7 @@ class EmulatorActivity : ComponentActivity() {
      */
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (status !is EmulatorStatus.Running) return super.dispatchGenericMotionEvent(event)
-        val port = portForDevice(event.deviceId, event.source)
+        val port = 0  // single-player por padrão
         var handled = false
         var changed = false
 
