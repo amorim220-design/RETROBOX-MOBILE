@@ -7,7 +7,9 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.SurfaceTexture
 import android.os.Bundle
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.WindowManager
@@ -41,9 +43,13 @@ import com.retrobox.data.UserPreferencesRepository
 import com.retrobox.data.VideoPreferences
 import com.retrobox.domain.Console
 import com.retrobox.emulation.BiosManager
+import com.retrobox.emulation.ConsoleInput
 import com.retrobox.emulation.EmulatorException
 import com.retrobox.emulation.EmulatorSession
 import com.retrobox.emulation.ErrorReporter
+import com.retrobox.emulation.GamepadManager
+import com.retrobox.emulation.InputPreferencesRepository
+import com.retrobox.emulation.InputProfile
 import com.retrobox.emulation.NativeEmulator
 import com.retrobox.emulation.RetroButton
 import com.retrobox.ui.screens.bios.BiosScreen
@@ -51,13 +57,17 @@ import com.retrobox.ui.screens.bios.BiosViewModel
 import com.retrobox.ui.theme.RetroBoxTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class EmulatorActivity : ComponentActivity() {
 
     private lateinit var session: EmulatorSession
     private lateinit var preferences: UserPreferencesRepository
+    private lateinit var inputPreferences: InputPreferencesRepository
+    private lateinit var gamepads: GamepadManager
     private var startJob: Job? = null
 
     private var console: Console? = null
@@ -74,6 +84,16 @@ class EmulatorActivity : ComponentActivity() {
     private var autoSaveOnExit by mutableStateOf(true)
     private var fps by mutableStateOf(0.0)
     private var geometry by mutableStateOf("")
+
+    /** Perfil de controles do console atual (zona morta, mapeamento, estilo). */
+    private var inputProfile by mutableStateOf<InputProfile?>(null)
+    private var lastInputEvent by mutableStateOf("")
+    private var showInputDiagnostics by mutableStateOf(false)
+    private var lastTouchActivity by mutableStateOf(0L)
+    private val announcedGamepads = mutableSetOf<Int>()
+
+    /** Slot de save state em uso (0..7). */
+    private var stateSlot by mutableStateOf(0)
 
     /** Estado da checagem de BIOS: bloqueia o start só quando falta arquivo. */
     private var biosWarning by mutableStateOf<BiosManager.Status?>(null)
@@ -121,6 +141,13 @@ class EmulatorActivity : ComponentActivity() {
         KeyEvent.KEYCODE_ALT_RIGHT to RetroButton.START
     )
 
+    /**
+     * Mapa efetivo de teclas: remap do usuário por cima do padrão do console.
+     */
+    private fun keyMapping(): Map<Int, Int> =
+        inputProfile?.mapping() ?: gamepadKeys
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -132,7 +159,10 @@ class EmulatorActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        preferences = (application as RetroBoxApplication).userPreferencesRepository
+        val app = application as RetroBoxApplication
+        preferences = app.userPreferencesRepository
+        inputPreferences = InputPreferencesRepository(this)
+        gamepads = GamepadManager(this)
         session = EmulatorSession(this)
 
         console = Console.fromId(intent.getStringExtra(EXTRA_CONSOLE) ?: "")
@@ -156,6 +186,11 @@ class EmulatorActivity : ComponentActivity() {
                 aspectMode = loaded.aspectMode
                 showControls = loaded.showControls
                 autoSaveOnExit = loaded.autoSaveOnExit
+
+                // perfil de controles (zona morta, mapeamento, estilo do overlay)
+                lifecycleScope.launch {
+                    inputPreferences.profile(active).collect { inputProfile = it }
+                }
 
                 val bios = BiosManager.status(this@EmulatorActivity, active)
                 if (bios != null && bios.requirement.files.isNotEmpty() && !bios.satisfied) {
@@ -189,11 +224,33 @@ class EmulatorActivity : ComponentActivity() {
                 is EmulatorStatus.Failed -> ErrorOverlay(current.message)
                 EmulatorStatus.Loading -> LoadingOverlay()
                 EmulatorStatus.Running -> {
-                    if (showControls && !showMenu) {
+                    val active = console
+
+                    // esconde o controle na tela depois de X segundos sem uso
+                    LaunchedEffect(inputProfile?.autoHideSeconds) {
+                        val seconds = inputProfile?.autoHideSeconds ?: 0
+                        while (seconds > 0) {
+                            delay(500)
+                            if (System.currentTimeMillis() - lastTouchActivity > seconds * 1000L) {
+                                showControls = false
+                            }
+                        }
+                    }
+
+                    if (showControls && !showMenu && active != null) {
                         TouchControls(
+                            console = active,
+                            layout = ConsoleInput.forConsole(active),
+                            profile = inputProfile ?: InputProfile(active),
                             onPress = { id, pressed ->
                                 NativeEmulator.nativeSetButton(0, id, pressed)
-                            }
+                                lastTouchActivity = System.currentTimeMillis()
+                            },
+                            onAnalog = { index, axis, value ->
+                                pushAxis(index, axis, value)
+                                lastTouchActivity = System.currentTimeMillis()
+                            },
+                            onActivity = { lastTouchActivity = System.currentTimeMillis() }
                         )
                     }
 
@@ -212,6 +269,25 @@ class EmulatorActivity : ComponentActivity() {
                                 .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
                         ) {
                             Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                        }
+                    }
+
+                    // Diagnóstico de input (mostra o último evento recebido)
+                    if (showInputDiagnostics && lastInputEvent.isNotBlank()) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(16.dp)
+                        ) {
+                            Text(
+                                lastInputEvent,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
                         }
                     }
 
@@ -421,15 +497,18 @@ class EmulatorActivity : ComponentActivity() {
                     Spacer(Modifier.height(8.dp))
 
                     MenuAction("Continuar") { showMenu = false }
-                    MenuAction("Salvar estado") {
-                        val ok = session.saveState()
+                    MenuAction("Salvar estado (slot ${stateSlot + 1})") {
+                        val ok = session.saveState(stateSlot)
                         showMenu = false
-                        toast(if (ok) "Estado salvo" else "Este núcleo não suporta save state")
+                        toast(if (ok) "Estado salvo no slot ${stateSlot + 1}" else "Este núcleo não suporta save state")
                     }
-                    MenuAction("Carregar estado") {
-                        val ok = session.loadState()
+                    MenuAction("Carregar estado (slot ${stateSlot + 1})") {
+                        val ok = session.loadState(stateSlot)
                         showMenu = false
-                        toast(if (ok) "Estado carregado" else "Nenhum estado salvo")
+                        toast(if (ok) "Estado do slot ${stateSlot + 1} carregado" else "Slot ${stateSlot + 1} vazio")
+                    }
+                    MenuAction("Trocar slot de save (agora: ${stateSlot + 1}/8)") {
+                        stateSlot = (stateSlot + 1) % 8
                     }
                     MenuAction("Reiniciar jogo") {
                         NativeEmulator.nativeReset()
@@ -459,6 +538,27 @@ class EmulatorActivity : ComponentActivity() {
                         showControls = !showControls
                         showMenu = false
                         persistSettings()
+                    }
+                    MenuAction(
+                        if (showInputDiagnostics) "Diagnóstico de input: ligado" else "Diagnóstico de input: desligado"
+                    ) {
+                        showInputDiagnostics = !showInputDiagnostics
+                        lastInputEvent = ""
+                    }
+                    MenuAction(
+                        "Controles: zona morta ${inputProfile?.deadzone ?: 15}%" +
+                            " · estilo ${TouchStyle.of(inputProfile?.onScreenStyle ?: 0).name.lowercase()}"
+                    ) {
+                        showMenu = false
+                        startActivity(
+                            android.content.Intent(
+                                this@EmulatorActivity,
+                                com.retrobox.ui.screens.input.InputSettingsActivity::class.java
+                            ).putExtra(
+                                com.retrobox.ui.screens.input.InputSettingsActivity.EXTRA_CONSOLE,
+                                console?.id
+                            )
+                        )
                     }
                     MenuAction("BIOS e firmware") {
                         showMenu = false
@@ -563,10 +663,13 @@ class EmulatorActivity : ComponentActivity() {
 
                 override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
                     startJob?.cancel()
+                    // IMPORTANT: para o core ANTES de liberar a surface.
+                    // Se a surface sumir com o thread de render ainda ativo, o
+                    // app toma SIGSEGV (e o Android mata o processo).
+                    session.stop()
                     pendingSurface?.release()
                     pendingSurface = null
                     pendingTexture = null
-                    session.stop()
                     if (!isFinishing) status = EmulatorStatus.Loading
                     return true
                 }
@@ -589,12 +692,124 @@ class EmulatorActivity : ComponentActivity() {
             showMenu = status is EmulatorStatus.Running
             return true
         }
-        val retroId = gamepadKeys[event.keyCode]
-        if (retroId != null && status is EmulatorStatus.Running) {
-            NativeEmulator.nativeSetButton(0, retroId, event.action == KeyEvent.ACTION_DOWN)
-            return true
+        if (status !is EmulatorStatus.Running) return super.dispatchKeyEvent(event)
+
+        val retroId = keyMapping()[event.keyCode]
+        if (retroId == null) return super.dispatchKeyEvent(event)
+
+        // Controle físico (USB/Bluetooth): avisa qual controle entrou e em que
+        // jogador ele ficou.
+        val port = portForDevice(event.deviceId, event.source)
+        val pressed = event.action == KeyEvent.ACTION_DOWN
+        if (pressed) {
+            announceGamepad(event.deviceId, port)
+            lastTouchActivity = System.currentTimeMillis()
+            // usar um controle físico mostra o overlay de novo (e o timer reinicia)
+            showControls = true
         }
-        return super.dispatchKeyEvent(event)
+        NativeEmulator.nativeSetButton(port, retroId, pressed)
+        lastInputEvent = "key ${KeyEvent.keyCodeToString(event.keyCode)} -> ${ConsoleInput.labelFor(retroId)}"
+        return true
+    }
+
+    /**
+     * Eixos analógicos e gatilhos dos controles (e o "chapéu" do direcional).
+     */
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (status !is EmulatorStatus.Running) return super.dispatchGenericMotionEvent(event)
+        val port = portForDevice(event.deviceId, event.source)
+        var handled = false
+        var changed = false
+
+        // Direcional analógico (chapéu)
+        if (event.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK) {
+            val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+            val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+            if (hatX != 0f || hatY != 0f) {
+                val mapping = keyMapping()
+                setMapped(mapping, KeyEvent.KEYCODE_DPAD_LEFT, port, hatX < -0.5f)
+                setMapped(mapping, KeyEvent.KEYCODE_DPAD_RIGHT, port, hatX > 0.5f)
+                setMapped(mapping, KeyEvent.KEYCODE_DPAD_UP, port, hatY < -0.5f)
+                setMapped(mapping, KeyEvent.KEYCODE_DPAD_DOWN, port, hatY > 0.5f)
+                handled = true
+                changed = true
+            }
+        }
+
+        // Sticks
+        val deadzone = (inputProfile?.deadzone ?: 15) / 100f
+        val sensitivityX = (inputProfile?.sensitivityX ?: 100) / 100f
+        val sensitivityY = (inputProfile?.sensitivityY ?: 100) / 100f
+        var lastAxisName = ""
+        var lastAxisValue = 0f
+        listOf(
+            MotionEvent.AXIS_X to (0 to sensitivityX),
+            MotionEvent.AXIS_Y to (1 to sensitivityY),
+            MotionEvent.AXIS_Z to (0 to sensitivityX),
+            MotionEvent.AXIS_RZ to (1 to sensitivityY)
+        ).forEach { (axis, slotAndSens) ->
+            val raw = event.getAxisValue(axis)
+            if (raw == 0f) return@forEach
+            val slot = slotAndSens.first
+            val sens = slotAndSens.second
+            val value = applyDeadzone(raw, deadzone) * sens
+            pushAxis(slot, if (axis == MotionEvent.AXIS_X || axis == MotionEvent.AXIS_Z) 0 else 1, value, port)
+            handled = true
+            changed = true
+            lastAxisName = MotionEvent.axisToString(axis)
+            lastAxisValue = raw
+        }
+
+        // Gatilhos analógicos viram L2/R2
+        val lt = event.getAxisValue(MotionEvent.AXIS_LTRIGGER)
+        val rt = event.getAxisValue(MotionEvent.AXIS_RTRIGGER)
+        if (lt > 0.5f) {
+            NativeEmulator.nativeSetButton(port, RetroButton.L2, true)
+            handled = true; changed = true
+        }
+        if (rt > 0.5f) {
+            NativeEmulator.nativeSetButton(port, RetroButton.R2, true)
+            handled = true; changed = true
+        }
+
+        if (changed) {
+            announceGamepad(event.deviceId, port)
+            lastTouchActivity = System.currentTimeMillis()
+            lastInputEvent = "eixo $lastAxisName = ${"%.2f".format(lastAxisValue)}"
+        }
+        return handled || super.dispatchGenericMotionEvent(event)
+    }
+
+    /** Aplica zona morta e ganho; devolve -1..1. */
+    private fun applyDeadzone(value: Float, deadzone: Float): Float {
+        val magnitude = abs(value)
+        if (magnitude <= deadzone) return 0f
+        val scaled = (magnitude - deadzone) / (1f - deadzone)
+        return if (value < 0) -scaled else scaled
+    }
+
+    /** Envia um eixo para o core (índice 0 = stick esquerdo). */
+    private fun pushAxis(index: Int, axis: Int, value: Float, port: Int = 0) {
+        val scaled = (value.coerceIn(-1f, 1f) * 32767f).toInt()
+        NativeEmulator.nativeSetAxis(port, index, axis, scaled)
+    }
+
+    private fun setMapped(mapping: Map<Int, Int>, keyCode: Int, port: Int, pressed: Boolean) {
+        val retroId = mapping[keyCode] ?: return
+        NativeEmulator.nativeSetButton(port, retroId, pressed)
+    }
+
+    /** Porta do controle: a primeira livre; "compartilhar controle" devolve sempre a 1. */
+    private fun portForDevice(deviceId: Int, source: Int): Int {
+        if (inputProfile?.shareController == true) return 1
+        return gamepads.portFor(deviceId)
+    }
+
+    /** Avisa (uma vez) o controle que acabou de conectar. */
+    private fun announceGamepad(deviceId: Int, port: Int) {
+        if (!announcedGamepads.add(deviceId)) return
+        val name = gamepads.deviceName(deviceId) ?: "Controle"
+        toast("Controle: $name (jogador $port)")
     }
 
     override fun onPause() {
@@ -604,6 +819,14 @@ class EmulatorActivity : ComponentActivity() {
         if (autoSaveOnExit && session.started && !isChangingConfigurations) {
             runCatching { session.saveState() }
         }
+    }
+
+    override fun onDestroy() {
+        // garante que o core pare mesmo se a textura não tiver sido destruída
+        if (session.started) {
+            runCatching { session.stop() }
+        }
+        super.onDestroy()
     }
 
     companion object {

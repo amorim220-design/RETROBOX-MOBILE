@@ -28,6 +28,7 @@ import com.retrobox.ui.theme.NeonBlue
 
 @Composable
 fun MainScreen(homeViewModel: HomeViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val navController = rememberNavController()
     val screens = listOf(
         Screen.Home,
@@ -109,7 +110,14 @@ fun MainScreen(homeViewModel: HomeViewModel) {
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     viewModel = viewModel<SettingsViewModel>(),
-                    onOpenBios = { navController.navigate(Screen.Bios.route) }
+                    onOpenBios = { navController.navigate(Screen.Bios.route) },
+                    onOpenInput = {
+                        val intent = android.content.Intent(
+                            context,
+                            com.retrobox.ui.screens.input.InputSettingsActivity::class.java
+                        )
+                        context.startActivity(intent)
+                    }
                 )
             }
 

@@ -960,6 +960,32 @@ void Emulator::setButton(int port, int id, bool pressed) {
     buttons_[port][id].store(pressed);
 }
 
+/**
+ * Eixo analógico (libretro pede direcao + magnitude).
+ *
+ * `index` = 0 (stick esquerdo) ou 1 (stick direito);
+ * `axis`  = 0 (X) ou 1 (Y);
+ * `value` = -32767..32767 (negativo = direcao negativa).
+ *
+ * O libretro lê X-/X+/Y-/Y+ em ids 0..3, entao guardamos o par e zeramos o
+ * sentido oposto.
+ */
+void Emulator::setAxis(int port, int index, int axis, int value) {
+    if (port < 0 || port >= 4 || index < 0 || index > 1 || axis < 0 || axis > 1) return;
+    if (value < -32767) value = -32767;
+    if (value > 32767) value = 32767;
+    const int base = index * 2;                    // 0 = stick esq., 2 = stick dir.
+    const int neg = base + (axis == 0 ? 0 : 2);    // X- / Y-
+    const int pos = base + (axis == 0 ? 1 : 3);    // X+ / Y+
+    if (value < 0) {
+        axis_[port][neg].store(static_cast<int16_t>(-value));
+        axis_[port][pos].store(0);
+    } else {
+        axis_[port][pos].store(static_cast<int16_t>(value));
+        axis_[port][neg].store(0);
+    }
+}
+
 void Emulator::inputPoll() {
     // Polled by the core; the JVM already pushed the current state through setButton().
 }
@@ -971,13 +997,13 @@ int16_t Emulator::inputState(unsigned port, unsigned device, unsigned index, uns
         return buttons_[port][id].load() ? 1 : 0;
     }
     if (device == RETRO_DEVICE_ANALOG) {
-        // index 0 = left stick, 1 = right stick
+        // index 0 = stick esquerdo, 1 = stick direito
         int base = static_cast<int>(index) * 2;
         if (base + 1 >= 4) return 0;
         if (id == 0) return axis_[port][base].load();      // X-
         if (id == 1) return axis_[port][base + 1].load();  // X+
-        if (id == 2) return axis_[port][base].load();
-        if (id == 3) return axis_[port][base + 1].load();
+        if (id == 2) return axis_[port][base + 2].load();  // Y-
+        if (id == 3) return axis_[port][base + 3].load();  // Y+
         return 0;
     }
     return 0;

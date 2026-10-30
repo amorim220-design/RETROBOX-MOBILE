@@ -24,6 +24,8 @@ object NativeEmulator {
     external fun nativeStop()
 
     external fun nativeSetButton(port: Int, id: Int, pressed: Boolean)
+    /** Eixo analogico: index 0 = stick esquerdo, 1 = direito; axis 0 = X, 1 = Y. */
+    external fun nativeSetAxis(port: Int, index: Int, axis: Int, value: Int)
     external fun nativeSetFastForward(enabled: Boolean)
     external fun nativeSetLinearFilter(linear: Boolean)
     external fun nativeSetAspectMode(mode: Int)

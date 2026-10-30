@@ -171,6 +171,7 @@ public:
     void unloadGame();
 
     void setButton(int port, int id, bool pressed);
+void setAxis(int port, int index, int axis, int value);
     void setRumbleEnabled(bool enabled) { rumbleEnabled_ = enabled; }
 
     std::vector<uint8_t> serializeState() const;

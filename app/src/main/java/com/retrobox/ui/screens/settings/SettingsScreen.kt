@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,7 +37,8 @@ import java.util.Locale
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
-    onOpenBios: () -> Unit
+    onOpenBios: () -> Unit,
+    onOpenInput: () -> Unit
 ) {
     val catalogUrl by viewModel.catalogUrl.collectAsState()
     val stats by viewModel.stats.collectAsState()
@@ -120,6 +122,27 @@ fun SettingsScreen(
                     )
                     catalogError?.let {
                         Text(it, color = Color(0xFFFF8A80), fontSize = 11.sp)
+                    }
+                }
+            }
+
+            item {
+                Section("CONTROLES") {
+                    Text(
+                        "Zona morta, sensibilidade, mapeamento de botões e aparência do " +
+                            "controle na tela. Vale para USB e Bluetooth.",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 11.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = onOpenInput) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Ajustar controles")
                     }
                 }
             }

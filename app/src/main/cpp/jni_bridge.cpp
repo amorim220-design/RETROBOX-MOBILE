@@ -81,6 +81,12 @@ Java_com_retrobox_emulation_NativeEmulator_nativeSetButton(JNIEnv *, jobject, ji
     Emulator::instance().setButton(port, id, pressed == JNI_TRUE);
 }
 
+JNIEXPORT void JNICALL
+Java_com_retrobox_emulation_NativeEmulator_nativeSetAxis(JNIEnv *, jobject, jint port, jint index,
+                                                          jint axis, jint value) {
+    Emulator::instance().setAxis(port, index, axis, value);
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_com_retrobox_emulation_NativeEmulator_nativeSaveState(JNIEnv *env, jobject) {
     std::vector<uint8_t> state = Emulator::instance().serializeState();
