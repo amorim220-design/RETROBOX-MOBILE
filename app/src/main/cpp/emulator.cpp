@@ -903,7 +903,12 @@ void Emulator::runLoop() {
     int frames = 0;
 
     while (!stopRequested_) {
-        runFn_();
+        {
+            // save/load/reset rodam na thread da UI: o núcleo não pode mudar
+            // de estado enquanto retro_run executa (era a causa do SIGSEGV).
+            std::lock_guard<std::mutex> lock(stateMutex_);
+            runFn_();
+        }
         frames++;
 
         // avisa o core que o buffer de audio tem espaco (evita travamento)
@@ -1334,6 +1339,7 @@ bool Emulator::unserializeState(const uint8_t *data, size_t size) {
 }
 
 void Emulator::reset() {
+    std::lock_guard<std::mutex> lock(stateMutex_);
     if (gameLoaded_ && resetFn_ != nullptr) resetFn_();
 }
 
