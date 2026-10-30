@@ -38,6 +38,7 @@
 
         <activity
             android:name=".ui.emulator.EmulatorActivity"
+            android:process=":emulator"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode"
             android:exported="false"
             android:label="@string/app_name"
@@ -48,6 +49,7 @@
         <!-- Ajustes de controles (zonas mortas, mapeamento, estilo do overlay). -->
         <activity
             android:name=".ui.screens.input.InputSettingsActivity"
+            android:process=":emulator"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
             android:label="@string/app_name"

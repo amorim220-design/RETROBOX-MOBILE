@@ -46,6 +46,9 @@ class RetroBoxApplication : Application() {
         StorageLayout.ensure(this)
         DownloadNotifications.ensureChannel(this)
 
+        // o processo `:emulator` (núcleo libretro) não faz trabalho de biblioteca
+        if (!isMainProcess()) return
+
         applicationScope.launch {
             // catálogo em cache/embutido: não bloqueia a primeira tela
             catalogRepository.ensureLoaded()
@@ -54,5 +57,10 @@ class RetroBoxApplication : Application() {
             // backup automático de saves (rotação diária, mantém 7)
             runCatching { SaveBackupManager.autoBackupIfDue(this@RetroBoxApplication) }
         }
+    }
+
+    private fun isMainProcess(): Boolean {
+        val name = android.app.Application.getProcessName()
+        return name == null || name == packageName
     }
 }
