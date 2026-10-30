@@ -20,6 +20,15 @@ debug.keystore
 cores-dl/
 testroms/
 
+# catalogo assinado: chaves privadas nunca vao para o repositorio
+tools/catalog/keys/
+*.seed
+
 
 /shots/
+
+
+# chave de assinatura da release
+my-upload-key.jks
+keystore.properties
 

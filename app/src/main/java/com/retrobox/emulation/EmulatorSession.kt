@@ -3,6 +3,7 @@ package com.retrobox.emulation
 import android.content.Context
 import android.net.Uri
 import android.view.Surface
+import com.retrobox.data.StorageLayout
 import com.retrobox.domain.Console
 import java.io.File
 import java.util.Locale
@@ -17,14 +18,22 @@ class EmulatorSession(private val context: Context) {
 
     private var gameKey: String = "game"
 
-    private val systemDir = File(context.filesDir, "system").apply { mkdirs() }
-    private val saveDir = File(context.filesDir, "saves").apply { mkdirs() }
-    private val stateDir = File(context.filesDir, "states").apply { mkdirs() }
-    private val romDir = File(context.filesDir, "roms").apply { mkdirs() }
+    private val systemDir = StorageLayout.system(context)
+    private val saveDir = StorageLayout.saves(context)
+    private val stateDir = StorageLayout.states(context)
+    private val romDir = StorageLayout.roms(context)
 
     private var core: CoreInfo? = null
     private var romPath: String? = null
     private var sramPath: String? = null
+
+    var console: Console? = null
+        private set
+
+    var gameTitle: String = ""
+        private set
+
+    val coreName: String get() = core?.displayName ?: "—"
 
     var started = false
         private set
@@ -36,6 +45,8 @@ class EmulatorSession(private val context: Context) {
             throw EmulatorException("O núcleo ${resolvedCore.displayName} não está neste APK.")
         }
 
+        this.console = console
+        this.gameTitle = title
         gameKey = sanitize(title) + "-" + Integer.toHexString(filePath.hashCode())
         sramPath = File(saveDir, "$gameKey.srm").absolutePath
         pendingSource = filePath
@@ -72,11 +83,17 @@ class EmulatorSession(private val context: Context) {
             return startError
         }
         started = true
+        romPath = rom
         return ""
     }
 
-    fun stop() {
+    /**
+     * Encerra a sessão. Com [saveState] = true tenta gravar um save state antes
+     * de descarregar o núcleo (o núcleo também grava a SRAM ao sair).
+     */
+    fun stop(saveState: Boolean = false) {
         if (started) {
+            if (saveState) runCatching { saveState(0) }
             NativeEmulator.nativeStop()
             NativeEmulator.nativeUnloadCore()
             started = false
@@ -100,6 +117,24 @@ class EmulatorSession(private val context: Context) {
     }
 
     fun hasState(slot: Int = 0): Boolean = File(stateDir, "$gameKey.$slot.state").exists()
+
+    fun sramFile(): File? = sramPath?.let { File(it) }
+
+    data class Diagnostics(
+        val console: String,
+        val core: String,
+        val romPath: String?,
+        val romBytes: Long,
+        val hasSram: Boolean
+    )
+
+    fun diagnostics(): Diagnostics = Diagnostics(
+        console = console?.displayName ?: "—",
+        core = coreName,
+        romPath = romPath,
+        romBytes = romPath?.let { File(it).length() } ?: 0L,
+        hasSram = sramFile()?.exists() == true
+    )
 
     private var pendingSource: String? = null
 
@@ -133,6 +168,7 @@ class EmulatorSession(private val context: Context) {
         val stream = context.contentResolver.openInputStream(uri)
             ?: throw EmulatorException("Sem permissão para ler este arquivo.")
         try {
+            target.parentFile?.mkdirs()
             target.outputStream().use { out ->
                 stream.use { input -> input.copyTo(out, 256 * 1024) }
             }

@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-30T00:00:00Z",
+  "entries": [
+    {
+      "id": "streemerz-nes",
+      "title": "Streemerz",
+      "console": "nes",
+      "fileName": "Streemerz.nes",
+      "sizeBytes": 0,
+      "url": null,
+      "description": "Homebrew de NES distribuido gratuitamente pelo autor. O RetroBox nao distribui o arquivo: use 'Usar arquivo' com o seu proprio download.",
+      "developer": "Faux Game Co.",
+      "region": "NTSC"
+    },
+    {
+      "id": "super-boss-gaiden-snes",
+      "title": "Super Boss Gaiden",
+      "console": "snes",
+      "fileName": "Super Boss Gaiden.sfc",
+      "sizeBytes": 0,
+      "url": null,
+      "description": "Homebrew de SNES distribuido gratuitamente pelo autor. Traga o seu arquivo.",
+      "developer": "Dieter von Laser",
+      "region": "NTSC"
+    },
+    {
+      "id": "anguna-gba",
+      "title": "Anguna: Warriors of Virtue",
+      "console": "gba",
+      "fileName": "Anguna.gba",
+      "sizeBytes": 0,
+      "url": null,
+      "description": "Homebrew de GBA distribuido gratuitamente pelo autor. Traga o seu arquivo.",
+      "developer": "Bite the Chili Productions",
+      "region": "NTSC"
+    },
+    {
+      "id": "tobu-tobu-girl-gb",
+      "title": "Tobu Tobu Girl",
+      "console": "gb",
+      "fileName": "TobuTobuGirl.gb",
+      "sizeBytes": 0,
+      "url": null,
+      "description": "Homebrew de Game Boy distribuido gratuitamente pelo autor. Traga o seu arquivo.",
+      "developer": "Tangram Games",
+      "region": "NTSC"
+    },
+    {
+      "id": "exemplo-ps1",
+      "title": "Exemplo PS1 (seu arquivo)",
+      "console": "ps1",
+      "fileName": "exemplo.cue",
+      "sizeBytes": 0,
+      "url": null,
+      "description": "Item de exemplo: mostra como o catalogo descreve um jogo sem hospedar nada. O app nao inclui nem distribui imagens de disco.",
+      "region": "NTSC"
+    },
+    {
+      "id": "exemplo-nds",
+      "title": "Exemplo DS (seu arquivo)",
+      "console": "nds",
+      "fileName": "exemplo.nds",
+      "sizeBytes": 0,
+      "url": null,
+      "description": "Item de exemplo: mostra como o catalogo descreve um jogo sem hospedar nada. O app nao inclui nem distribui ROMs.",
+      "region": "NTSC"
+    }
+  ]
+}

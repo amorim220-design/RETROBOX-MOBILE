@@ -1,3 +1,37 @@
 <resources>
     <string name="app_name">RetroBox</string>
+
+    <!-- downloads -->
+    <string name="download_channel_name">Downloads</string>
+    <string name="download_channel_description">Progresso dos jogos baixados do catálogo</string>
+    <string name="download_notification_title">Baixando %1$s</string>
+
+    <!-- navegação -->
+    <string name="nav_home">Início</string>
+    <string name="nav_catalog">Catálogo</string>
+    <string name="nav_library">Biblioteca</string>
+    <string name="nav_settings">Configurações</string>
+
+    <!-- catálogo -->
+    <string name="catalog_title">Catálogo</string>
+    <string name="catalog_refresh">Atualizar catálogo</string>
+    <string name="catalog_empty">Nenhum item no catálogo.</string>
+    <string name="catalog_configure">Configure a URL de um catálogo assinado em Configurações.</string>
+    <string name="catalog_download">Baixar</string>
+    <string name="catalog_cancel">Cancelar</string>
+    <string name="catalog_install_local">Usar meu arquivo</string>
+    <string name="catalog_installed">Jogar</string>
+
+    <!-- BIOS -->
+    <string name="bios_title">BIOS e firmware</string>
+    <string name="bios_subtitle">Arquivos do próprio usuário. O app não inclui nem baixa BIOS.</string>
+    <string name="bios_import">Importar</string>
+    <string name="bios_missing">Faltando</string>
+    <string name="bios_present">OK</string>
+    <string name="bios_invalid">Tamanho inesperado</string>
+
+    <!-- erros -->
+    <string name="error_title">Não foi possível iniciar</string>
+    <string name="error_copy">Copiar detalhes</string>
+    <string name="error_bios">Abrir BIOS</string>
 </resources>

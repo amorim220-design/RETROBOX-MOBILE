@@ -1,4 +1,13 @@
 ﻿import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
+
+/** Valor de ambiente seguro para virar BuildConfig (sem quebrar o literal). */
+fun envString(name: String, fallback: String = ""): String =
+    (System.getenv(name) ?: fallback)
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "")
+        .trim()
 
 plugins {
     alias(libs.plugins.android.application)
@@ -31,6 +40,15 @@ android {
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Catálogo remoto assinado (ver catalog/CatalogVerifier.kt).
+        // Sem variáveis de ambiente o app usa o exemplo embutido em assets.
+        buildConfigField("String", "CATALOG_URL", "\"${envString("RETROBOX_CATALOG_URL")}\"")
+        buildConfigField("String", "CATALOG_PUBLIC_KEY", "\"${envString("RETROBOX_CATALOG_PUBLIC_KEY")}\"")
+        buildConfigField("String", "CATALOG_KEY_ID", "\"${envString("RETROBOX_CATALOG_KEY_ID", "app")}\"")
+        buildConfigField("String", "CATALOG_PINNED_SHA256", "\"${envString("RETROBOX_CATALOG_PINNED_SHA256")}\"")
+        buildConfigField("String", "CATALOG_CERT_PIN", "\"${envString("RETROBOX_CATALOG_PIN")}\"")
+        buildConfigField("String", "CATALOG_PIN_HOST", "\"${envString("RETROBOX_CATALOG_PIN_HOST")}\"")
     }
 
     externalNativeBuild {
@@ -52,11 +70,21 @@ android {
     // and updating Android apps in AI Studio.
     signingConfigs {
         create("release") {
-            val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+            // Ordem de precedencia:
+            // 1) variaveis de ambiente (CI);
+            // 2) keystore.properties na raiz (local, NAO versionado);
+            // 3) padrao da raiz.
+            val props = Properties().apply {
+                val file = rootProject.file("keystore.properties")
+                if (file.exists()) file.inputStream().use { load(it) }
+            }
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+                ?: props.getProperty("storeFile")
+                ?: "${rootDir}/my-upload-key.jks"
             storeFile = file(keystorePath)
-            storePassword = System.getenv("STORE_PASSWORD")
-            keyAlias = "upload"
-            keyPassword = System.getenv("KEY_PASSWORD")
+            storePassword = System.getenv("STORE_PASSWORD") ?: props.getProperty("storePassword")
+            keyAlias = System.getenv("KEY_ALIAS") ?: props.getProperty("keyAlias") ?: "upload"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: props.getProperty("keyPassword")
         }
         create("debugConfig") {
             storeFile = file("${rootDir}/debug.keystore")
@@ -131,6 +159,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.work.runtime)
     implementation(libs.coil.compose)
     implementation(libs.converter.moshi)
     // implementation(libs.firebase.ai)

@@ -153,17 +153,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         games = games,
                         onGameClick = { game ->
                             viewModel.launchGame(game)
-                            if (game.filePath.startsWith("demo://")) {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "Item de demonstração — importe um jogo real com o +",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            } else {
-                                context.startActivity(EmulatorActivity.intent(context, game))
-                            }
+                            context.startActivity(EmulatorActivity.intent(context, game))
                         },
-                        onToggleFavorite = { viewModel.toggleFavorite(it) }
+                        onToggleFavorite = { viewModel.toggleFavorite(it) },
+                        onDelete = { game, deleteFile -> viewModel.deleteGame(game, deleteFile) }
                     )
                 }
             }

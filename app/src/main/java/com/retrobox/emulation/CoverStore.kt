@@ -70,9 +70,27 @@ object CoverStore {
 
     /** Nome do arquivo em cache (deterministico, reaproveitado entre sessoes). */
     private fun cacheFile(context: Context, console: Console, title: String): File {
-        val dir = File(context.filesDir, "covers/${console.id}").apply { mkdirs() }
+        val dir = File(com.retrobox.data.StorageLayout.covers(context), console.id).apply { mkdirs() }
         val key = Integer.toHexString("$console:$title".hashCode())
         return File(dir, "$key.jpg")
+    }
+
+    /**
+     * Baixa uma capa de uma URL qualquer (ex.: `coverUrl` do catálogo) e aplica
+     * o mesmo redimensionamento/cache das capas do libretro.
+     */
+    suspend fun coverFromUrl(
+        context: Context,
+        console: Console,
+        url: String,
+        seed: String
+    ): String? = withContext(Dispatchers.IO) {
+        if (!url.startsWith("https://") && !url.startsWith("http://localhost") &&
+            !url.startsWith("http://127.0.0.1")
+        ) return@withContext null
+        val target = cacheFile(context, console, "url:$seed")
+        if (target.exists() && target.length() > 0L) return@withContext target.absolutePath
+        if (download(url, target)) target.absolutePath else null
     }
 
     private fun encode(value: String): String =

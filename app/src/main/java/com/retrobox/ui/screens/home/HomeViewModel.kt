@@ -38,6 +38,12 @@ class HomeViewModel(
     val recentGames: StateFlow<List<Game>> = gameRepository.recentGames
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allGames: StateFlow<List<Game>> = gameRepository.allGames
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favoriteGames: StateFlow<List<Game>> = gameRepository.favoriteGames
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.lastSelectedConsole.collect { console ->
@@ -167,6 +173,26 @@ class HomeViewModel(
     fun toggleFavorite(game: Game) {
         viewModelScope.launch {
             gameRepository.updateGame(game.copy(isFavorite = !game.isFavorite))
+        }
+    }
+
+    /**
+     * Remove o jogo da biblioteca. Com [deleteFile] = true apaga também a cópia
+     * dentro do app (`files/roms/...`); o arquivo original do usuário, que fica
+     * fora do app, nunca é tocado.
+     */
+    fun deleteGame(game: Game, deleteFile: Boolean) {
+        viewModelScope.launch {
+            gameRepository.deleteGame(game)
+            if (deleteFile && game.filePath.startsWith("/")) {
+                val removed = runCatching { java.io.File(game.filePath).delete() }.getOrDefault(false)
+                _message.emit(
+                    if (removed) "“${game.title}” removido (arquivo apagado)"
+                    else "“${game.title}” removido da lista"
+                )
+            } else {
+                _message.emit("“${game.title}” removido da lista")
+            }
         }
     }
 

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import com.retrobox.data.Game
 import com.retrobox.data.GameRepository
+import com.retrobox.data.StorageLayout
 import com.retrobox.domain.Console
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,7 +19,8 @@ import java.io.File
  * PS1, PSP...), mas o console tambem e detectado pela extensao do arquivo.
  *
  * Cada ROM e copiada para o armazenamento privado do app porque o nucleo
- * libretro precisa abrir o arquivo por um caminho real.
+ * libretro precisa abrir o arquivo por um caminho real. O SHA-256 identifica
+ * o arquivo (evita duplicata renomeada) e casa com o catálogo.
  */
 object LibraryImporter {
 
@@ -26,7 +28,10 @@ object LibraryImporter {
         val imported: Int,
         val withCover: Int,
         val skipped: Int,
-        val errors: List<String>
+        val errors: List<String>,
+        /** Itens que casaram com o catálogo (título/capa oficiais). */
+        val identified: Int = 0,
+        val scanned: Int = 0
     )
 
     /** Extensoes que sao o "ponto de entrada" de um jogo. */
@@ -199,6 +204,7 @@ object LibraryImporter {
         var imported = 0
         var withCover = 0
         var skipped = 0
+        var identifiedCount = 0
         val errors = mutableListOf<String>()
 
         games.forEachIndexed { index, source ->
@@ -220,25 +226,40 @@ object LibraryImporter {
 
             try {
                 val relative = relativePathFor(source, console)
-                val destination = File(context.filesDir, "roms/${console.id}/$relative")
+                val destination = File(StorageLayout.romsFor(context, console.id), relative)
                 if (!destination.exists() || destination.length() == 0L) {
                     destination.parentFile?.mkdirs()
                     source.copyTo(destination)
                 }
 
-                val title = GameTitle.clean(source.name)
-                repository.addGame(
+                // identifica pelo conteúdo: o mesmo jogo renomeado não duplica
+                val sha = RomIdentifier.sha256(destination)
+                if (repository.gameBySha256(sha) != null) {
+                    skipped++
+                    return@forEachIndexed
+                }
+                val identified = RomIdentifier.match(repository, sha)
+
+                val title = identified?.title ?: GameTitle.clean(source.name)
+                val inserted = repository.addGame(
                     Game(
                         title = title,
-                        console = console,
+                        console = identified?.console ?: console,
                         filePath = destination.absolutePath,
-                        coverUri = null,
-                        rawTitle = source.name
+                        coverUri = identified?.coverUrl,
+                        rawTitle = source.name,
+                        catalogId = identified?.id,
+                        sha256 = sha
                     )
                 )
+                if (!inserted) {
+                    skipped++
+                    return@forEachIndexed
+                }
                 imported++
+                if (identified != null) identifiedCount++
 
-                val cover = CoverStore.coverFor(context, console, source.name)
+                val cover = CoverStore.coverFor(context, identified?.console ?: console, source.name)
                 if (cover != null) {
                     repository.updateCover(destination.absolutePath, cover)
                     withCover++
@@ -248,7 +269,7 @@ object LibraryImporter {
             }
         }
 
-        return Result(imported, withCover, skipped, errors)
+        return Result(imported, withCover, skipped, errors, identifiedCount, games.size)
     }
 
     private fun consoleFor(source: Source, extension: String): Console? {

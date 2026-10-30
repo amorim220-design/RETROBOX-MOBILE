@@ -23,8 +23,14 @@ emulação rodam no mesmo processo: o usuário não instala RetroArch, PPSSPP ou
 | Áudio AAudio com ring buffer | ✅ |
 | Controles: overlay multitoque + gamepad físico | ✅ |
 | Save state / SRAM (armazenamento interno do app) | ✅ |
+| **Catálogo remoto assinado (Ed25519) com fallback de hash fixado** | ✅ |
+| **Download com WorkManager: retomada (HTTP Range), SHA-256, notificação** | ✅ |
+| **Gerenciador de BIOS importado pelo usuário (sem BIOS no APK)** | ✅ |
+| **Identificação de ROM por SHA-256/CRC32 + casamento com o catálogo** | ✅ |
+| **Backup/restauração de saves (zip) automático e manual** | ✅ |
+| **Erros visíveis com relatório + `files/logs/last_error.txt`** | ✅ |
+| **Configurações persistidas por console + autosave ao sair** | ✅ |
 | Testado em aparelho real (arm64, Android 16) | ✅ SNES a 60 fps |
-| BIOS de PS1/NDS/PSP | ⏳ pasta `system/` preparada, sem BIOS embutida |
 
 ### Testes reais
 
@@ -32,9 +38,15 @@ emulação rodam no mesmo processo: o usuário não instala RetroArch, PPSSPP ou
 |---|---|
 | Importação em lote de 41 ROMs (SNES/GBA/N64/MD) | ✅ 41 jogos, 28 capas |
 | NES (FCEUmm) | ✅ 60 fps, áudio OK, save state OK |
-| SNES (Snes9x 2005 Plus) | ✅ **59,9 fps** em aparelho real (arm64) |
+| SNES (Snes9x 2005 Plus) | ✅ **59,8–60,5 fps** em aparelho real (arm64) |
 | Toque nos controles on-screen | ✅ (multitoque) |
 | Save state / load state | ✅ (46 KB por estado) |
+| Migração Room v2 → v3 (com `catalog`, `downloads`, `sha256`) | ✅ biblioteca preservada |
+| Catálogo embutido assinado (Ed25519) | ✅ “catálogo v1 … (assinatura Ed25519)” |
+| Catálogo remoto por HTTP + assinatura | ✅ recusado sem assinatura, aceito com Ed25519 |
+| Download de 8 MB com SHA-256 | ✅ arquivo só entra na biblioteca depois do hash |
+| Download interrompido (app morto no meio) | ✅ retomou com `206` a partir do `.part` |
+| Backup automático de saves | ✅ zip diário com rotação (mantém 7) |
 
 ---
 
@@ -72,6 +84,16 @@ Arquivos-chave:
 | `emulation/LibraryImporter.kt` | importação em lote (SAF e pasta do app) |
 | `emulation/CoverStore.kt` | download das capas + cache local |
 | `emulation/GameTitle.kt` | limpeza de nome e candidatos para busca de capa |
+| `emulation/BiosManager.kt` | requisitos de BIOS por console, importação e validação |
+| `emulation/RomIdentifier.kt` | SHA-256, CRC32 e serial do cartucho |
+| `emulation/ErrorReporter.kt` | relatório de erro gravado em `files/logs/` |
+| `catalog/CatalogRepository.kt` | carrega/valida/grava o catálogo (URL ou asset) |
+| `catalog/CatalogVerifier.kt` | Ed25519 + fallback de hash fixado |
+| `catalog/CatalogKeys.kt` | chaves públicas aceitas |
+| `download/RomDownloader.kt` | Range/retomada, SHA-256, rename atômico |
+| `download/GameDownloadWorker.kt` | worker do WorkManager (progresso, notificação) |
+| `backup/SaveBackupManager.kt` | zip de saves/states, rotação, export/restore |
+| `data/StorageLayout.kt` | layout versionado de arquivos do app |
 | `ui/emulator/EmulatorActivity.kt` | TextureView, menu in-game, FPS, fast-forward, aspecto |
 | `ui/emulator/TouchControls.kt` | D-pad, A/B/X/Y, L/R, Start/Select |
 
@@ -181,9 +203,67 @@ baixadas na importação e **guardadas em cache** (`files/covers/`), redimension
 `# GBA`, `1840 - ` etc. são removidos e a região é traduzida). Sem internet, o app usa
 uma capa gerada (gradiente do console + título).
 
-BIOS (opcional): copie para o armazenamento interno do app em
-`/data/data/com.retrobox.mobile/files/system/` (`scph5501.bin`, `bios7.bin`, `bios9.bin`,
-`firmware.bin`…). Sem BIOS, PCSX-ReARMed usa HLE; melonDS/PPSSPP podem exigir arquivos próprios.
+BIOS (opcional): o app **não inclui nem baixa BIOS**. Em **Ajustes → Gerenciar BIOS** (ou no
+menu do emulador) você importa o arquivo que já tem: `scph5501.bin` (PS1, 512 KB),
+`bios7.bin`/`bios9.bin` (NDS), `firmware.bin` (opcional). O arquivo é validado por
+tamanho e gravado em `files/system/`. Sem BIOS, o PCSX-ReARMed usa HLE; o app só
+**avisa** (não bloqueia) e oferece *Continuar / Importar / Gerenciar*.
+
+### Remover da biblioteca
+
+Toque e segure um jogo na grade → *Remover e apagar arquivo* (tira da lista e apaga a
+cópia em `files/roms/`) ou *Só da lista*. O arquivo original que você importou nunca é
+apagado.
+
+---
+
+## 5b. Catálogo, download, backup e configuração
+
+### Catálogo assinado
+
+O catálogo é uma lista de **metadados** (título, console, tamanho, SHA-256 e URL
+opcional). Ele nunca traz ROM nem BIOS, e o app **recusa** um catálogo sem prova de
+origem: assinatura **Ed25519** sobre os bytes do payload ou, em aparelhos sem Ed25519
+(Android < 13), um **SHA-256 fixado** no APK.
+
+```powershell
+# assinar o catálogo de exemplo e embutir no APK
+java tools/catalog/CatalogTool.java sign tools/catalog/catalog-payload.json sample `
+    tools/catalog/keys/sample.seed app/src/main/assets/catalog.json
+
+# conferir
+java tools/catalog/CatalogTool.java verify app/src/main/assets/catalog.json `
+    tools/catalog/keys/sample.pub
+```
+
+Detalhes do envelope, das regras do payload e da rotação de chaves:
+[`tools/catalog/README.md`](tools/catalog/README.md).
+
+Para apontar para um catálogo próprio: **Ajustes → URL do catálogo** (ou
+`RETROBOX_CATALOG_URL` no build). `url` vazio = “traga seu próprio arquivo”.
+
+### Download
+
+A aba **Catálogo** baixa o item: `.part` em `files/downloads` → HTTP Range (retoma) →
+conferência de tamanho e **SHA-256** → `rename` atômico para `files/roms/<console>/`.
+Só depois disso o jogo entra na biblioteca. O download roda em WorkManager (sobrevive ao
+app em segundo plano), mostra progresso na tela e na notificação, e é retomado
+automaticamente se o processo morrer.
+
+### Backup dos saves
+
+**Ajustes → Saves e backup**: backup automático diário (zip em `files/backup/`, mantém os
+7 mais recentes), botão *Backup agora*, *Exportar* (SAF) e *Restaurar*. O zip tem
+`manifest.json` + `saves/` + `states/`; a restauração ignora qualquer caminho fora dessas
+pastas (zip-slip).
+
+### Ferramentas de desenvolvimento
+
+```powershell
+# servidor HTTP local com Range (para testar download/retomada)
+java tools/dev/RangeServer.java C:\caminho\de\testes 8000
+adb reverse tcp:8000 tcp:8000
+```
 
 ---
 
@@ -211,8 +291,9 @@ BIOS (opcional): copie para o armazenamento interno do app em
 2. Extração de `.zip`/`.7z` no import (cache do app).
 3. Mapeamento de botões por console (PS1: △○×□ em vez de A/B/X/Y; SNES: layout Nintendo).
 4. UI de opções por núcleo (parsing seguro de `SET_CORE_OPTIONS_V2`).
-5. Salvar automaticamente o estado ao sair do jogo.
+5. `libretro-db.sqlite` embutido para identificar ROMs que não estão no catálogo.
 6. Remover a ABI `x86_64` e os núcleos correspondentes antes de publicar.
+7. Assinar a release (`KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`) e publicar.
 
 ---
 
@@ -245,7 +326,10 @@ for mexer no `emulator.cpp`:
 
 ---
 
-## 8. Legal
+## 9. Legal
 
 Nenhuma ROM, BIOS ou conteúdo protegido é distribuído com o projeto. Use apenas arquivos que você
 possui. Os núcleos mantêm suas licenças originais; o app é um frontend libretro independente.
+
+O catálogo remoto é apenas metadado (título, console, tamanho, hash e URL): quem publica um
+catálogo é responsável pelo conteúdo apontado e pelos direitos dele.

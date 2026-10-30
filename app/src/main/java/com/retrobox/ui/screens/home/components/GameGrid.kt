@@ -1,7 +1,9 @@
 ﻿package com.retrobox.ui.screens.home.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -13,6 +15,10 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,13 +37,18 @@ import com.retrobox.data.Game
 import com.retrobox.ui.theme.NeonBlue
 import com.retrobox.ui.theme.SurfaceVariantDark
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GameGrid(
     games: List<Game>,
     onGameClick: (Game) -> Unit,
     onToggleFavorite: (Game) -> Unit,
+    /** Long-press: remover da biblioteca (opcional). */
+    onDelete: ((Game, deleteFile: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    var pendingDelete by remember { mutableStateOf<Game?>(null) }
+
     if (games.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -58,23 +69,59 @@ fun GameGrid(
                 GameCard(
                     game = game,
                     onClick = { onGameClick(game) },
-                    onToggleFavorite = { onToggleFavorite(game) }
+                    onToggleFavorite = { onToggleFavorite(game) },
+                    onLongClick = if (onDelete != null) {
+                        { pendingDelete = game }
+                    } else {
+                        null
+                    }
                 )
             }
         }
     }
+
+    pendingDelete?.let { game ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Remover “${game.title}”?") },
+            text = {
+                Text(
+                    "Sai da biblioteca. O arquivo copiado para o app " +
+                        "(files/roms/${game.console.id}/) pode ser apagado junto; " +
+                        "o original que você importou não é afetado."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete?.invoke(game, true)
+                    pendingDelete = null
+                }) { Text("Remover e apagar arquivo") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        onDelete?.invoke(game, false)
+                        pendingDelete = null
+                    }) { Text("Só da lista") }
+                    TextButton(onClick = { pendingDelete = null }) { Text("Cancelar") }
+                }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GameCard(
     game: Game,
     onClick: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         Box(
             modifier = Modifier
