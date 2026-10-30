@@ -1,4 +1,6 @@
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +17,7 @@ import java.security.spec.NamedParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
 
 /**
  * Ferramenta de linha de comando do catalogo assinado do RetroBox.
@@ -119,11 +122,24 @@ public final class CatalogTool {
         }
         Path payloadFile = Paths.get(args[1]);
         String keyId = args[2];
-        Path seedFile = args.length > 3
-            ? Paths.get(args[3])
-            : Paths.get("tools/catalog/keys", keyId + ".seed");
-        byte[] payload = Files.readAllBytes(payloadFile);
-        if (payload.length == 0) throw new IOException("payload vazio: " + payloadFile);
+        boolean deflate = List.of(args).contains("--deflate");
+        Path seedFile = null;
+        Path outFile = null;
+        for (int i = 3; i < args.length; i++) {
+            if (args[i].equals("--deflate")) continue;
+            if (seedFile == null) seedFile = Paths.get(args[i]);
+            else if (outFile == null) outFile = Paths.get(args[i]);
+        }
+        if (seedFile == null) {
+            seedFile = Paths.get("tools/catalog/keys", keyId + ".seed");
+        }
+        byte[] raw = Files.readAllBytes(payloadFile);
+        if (raw.length == 0) throw new IOException("payload vazio: " + payloadFile);
+
+        // formato 2: o payload viaja comprimido (deflate). A assinatura cobre
+        // exatamente os bytes que vao no envelope, entao a verificacao acontece
+        // antes de descompactar.
+        byte[] payload = deflate ? deflate(raw) : raw;
 
         PrivateKey key = privateKey(Files.readString(seedFile).trim());
         Signature signer = Signature.getInstance("Ed25519");
@@ -132,23 +148,44 @@ public final class CatalogTool {
         byte[] signature = signer.sign();
 
         String envelope = "{\n"
-            + "  \"format\": 1,\n"
+            + "  \"format\": " + (deflate ? 2 : 1) + ",\n"
             + "  \"keyId\": \"" + escape(keyId) + "\",\n"
             + "  \"payload\": \"" + Base64.getEncoder().encodeToString(payload) + "\",\n"
             + "  \"signature\": \"" + Base64.getEncoder().encodeToString(signature) + "\"\n"
             + "}\n";
 
-        if (args.length > 4) {
-            Path out = Paths.get(args[4]);
-            Files.createDirectories(out.toAbsolutePath().getParent());
-            Files.writeString(out, envelope);
-            System.out.println("envelope escrito em " + out.toAbsolutePath());
+        if (outFile != null) {
+            Files.createDirectories(outFile.toAbsolutePath().getParent());
+            Files.writeString(outFile, envelope);
+            System.out.println("envelope escrito em " + outFile.toAbsolutePath());
         } else {
             System.out.print(envelope);
         }
-        System.out.println("payload ....... " + payload.length + " bytes");
+        System.out.println("formato ....... " + (deflate ? 2 : 1));
+        System.out.println("payload ....... " + payload.length + " bytes"
+            + (deflate ? " (deflate de " + raw.length + ")" : ""));
         System.out.println("assinatura .... " + signature.length + " bytes");
         System.out.println("sha-256 ....... " + sha256Hex(payload));
+    }
+
+    /** Comprime o payload (deflate bruto, sem cabecalho zlib). */
+    private static byte[] deflate(byte[] data) throws IOException {
+        // nowrap = true: deflate puro (o Inflater do app tambem usa nowrap)
+        java.util.zip.Deflater deflater = new java.util.zip.Deflater(9, true);
+        try {
+            deflater.setInput(data);
+            deflater.finish();
+            ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64, data.length / 4));
+            byte[] buffer = new byte[64 * 1024];
+            while (!deflater.finished()) {
+                int n = deflater.deflate(buffer);
+                if (n <= 0) break;
+                out.write(buffer, 0, n);
+            }
+            return out.toByteArray();
+        } finally {
+            deflater.end();
+        }
     }
 
     // ------------------------------------------------------------- verify ----
@@ -169,6 +206,7 @@ public final class CatalogTool {
         if (raw.length != 32) throw new IOException("chave publica deve ter 32 bytes (tem " + raw.length + ")");
 
         String keyId = extract(envelope, "keyId");
+        int format = extractInt(envelope, "format");
         byte[] payload = Base64.getDecoder().decode(extract(envelope, "payload"));
         byte[] signature = Base64.getDecoder().decode(extract(envelope, "signature"));
 
@@ -179,10 +217,39 @@ public final class CatalogTool {
         boolean ok = verifier.verify(signature);
 
         System.out.println("keyId ......... " + keyId);
+        System.out.println("formato ....... " + format);
         System.out.println("payload ....... " + payload.length + " bytes");
+        if (format == 2) {
+            System.out.println("json ........... " + inflate(payload).length + " bytes (deflate)");
+        }
         System.out.println("sha-256 ....... " + sha256Hex(payload));
         System.out.println(ok ? "ASSINATURA OK" : "ASSINATURA INVALIDA");
         if (!ok) System.exit(1);
+    }
+
+    /** Descompacta um payload no formato 2 (deflate bruto). */
+    private static byte[] inflate(byte[] data) throws IOException {
+        java.util.zip.Inflater inflater = new java.util.zip.Inflater(true);
+        try {
+            inflater.setInput(data);
+            ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64, data.length * 6));
+            byte[] buffer = new byte[64 * 1024];
+            while (!inflater.finished()) {
+                int n;
+                try {
+                    n = inflater.inflate(buffer);
+                } catch (java.util.zip.DataFormatException e) {
+                    throw new IOException("payload deflate invalido: " + e.getMessage(), e);
+                }
+                if (n == 0) {
+                    if (inflater.needsInput() || inflater.needsDictionary()) break;
+                }
+                out.write(buffer, 0, n);
+            }
+            return out.toByteArray();
+        } finally {
+            inflater.end();
+        }
     }
 
     // ---------------------------------------------------------------- pin ----
@@ -210,6 +277,21 @@ public final class CatalogTool {
         System.arraycopy(SPKI_PREFIX, 0, spki, 0, SPKI_PREFIX.length);
         System.arraycopy(raw, 0, spki, SPKI_PREFIX.length, raw.length);
         return KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(spki));
+    }
+
+    /** Extrai um campo numerico simples do envelope. */
+    private static int extractInt(String json, String field) throws IOException {
+        String marker = "\"" + field + "\"";
+        int at = json.indexOf(marker);
+        if (at < 0) throw new IOException("campo '" + field + "' ausente no envelope");
+        int colon = json.indexOf(':', at + marker.length());
+        if (colon < 0) throw new IOException("campo '" + field + "' malformado");
+        int i = colon + 1;
+        while (i < json.length() && (json.charAt(i) == ' ' || json.charAt(i) == '\t')) i++;
+        int start = i;
+        while (i < json.length() && Character.isDigit(json.charAt(i))) i++;
+        if (start == i) throw new IOException("campo '" + field + "' nao e numerico");
+        return Integer.parseInt(json.substring(start, i));
     }
 
     /** Extrai um campo string plano do envelope (sem dependencia de JSON). */

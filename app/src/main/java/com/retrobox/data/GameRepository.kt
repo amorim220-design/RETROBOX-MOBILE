@@ -22,6 +22,13 @@ class GameRepository(
     fun getCatalogByConsole(console: Console): Flow<List<CatalogEntry>> =
         catalogDao.observeByConsole(console)
 
+    /** Busca no catálogo por título (com console opcional). */
+    fun searchCatalog(query: String, console: Console?): Flow<List<CatalogEntry>> =
+        catalogDao.search(query.trim(), console)
+
+    /** Consolas que existem no catálogo (chips de filtro). */
+    val catalogConsoles: Flow<List<Console>> = catalogDao.observeConsoles()
+
     /**
      * Adiciona um jogo importado. Devolve `false` se já existia um arquivo no
      * mesmo caminho; se o mesmo conteúdo (sha256) já está na biblioteca, também
@@ -83,6 +90,9 @@ class GameRepository(
     suspend fun catalogEntry(id: String): CatalogEntry? = catalogDao.getById(id)
 
     suspend fun catalogEntryBySha256(sha256: String): CatalogEntry? = catalogDao.getBySha256(sha256)
+
+    /** Casa pelo MD5 do cartucho (identidade usada pela base do libretro). */
+    suspend fun catalogEntryByMd5(md5: String): CatalogEntry? = catalogDao.getByMd5(md5)
 
     /** Remove o catálogo e a biblioteca (não apaga arquivos: isso é feito fora). */
     suspend fun clearAll() {

@@ -13,10 +13,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,7 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.retrobox.data.CatalogEntry
 import com.retrobox.data.DownloadState
 import com.retrobox.domain.Console
@@ -45,6 +47,7 @@ import com.retrobox.ui.theme.SurfaceVariantDark
 fun CatalogScreen(viewModel: CatalogViewModel) {
     val items by viewModel.items.collectAsState()
     val console by viewModel.console.collectAsState()
+    val search by viewModel.search.collectAsState()
     val refreshing by viewModel.refreshing.collectAsState()
     val lastError by viewModel.lastError.collectAsState(null)
     val context = LocalContext.current
@@ -62,7 +65,7 @@ fun CatalogScreen(viewModel: CatalogViewModel) {
         viewModel.message.collect { snackbar.showSnackbar(it) }
     }
 
-    val consoles = remember(items) { items.map { it.entry.console }.distinct() }
+    val consoles by viewModel.consoles.collectAsState()
 
     Scaffold(
         containerColor = BackgroundDark,
@@ -118,6 +121,25 @@ fun CatalogScreen(viewModel: CatalogViewModel) {
                     }
                 }
             }
+
+            OutlinedTextField(
+                value = search,
+                onValueChange = viewModel::setSearch,
+                placeholder = { Text("Buscar jogo pelo nome…") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (search.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setSearch("") }) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar")
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp)
+            )
 
             if (items.isEmpty()) {
                 EmptyCatalog(refreshing, lastError) { viewModel.refresh() }
@@ -198,6 +220,68 @@ private fun EmptyCatalog(refreshing: Boolean, lastError: String?, onRefresh: () 
 }
 
 @Composable
+private fun PlaceholderCover(title: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(NeonBlue.copy(alpha = 0.22f), SurfaceVariantDark, Color.Black)
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            title,
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(10.dp)
+        )
+    }
+}
+
+/**
+ * Capa do item do catálogo.
+ *
+ * O nome do arquivo da box art nem sempre é igual ao título do catálogo
+ * (o reposório de thumbnails usa o nome do dump). Então tentamos as variações
+ * em sequência: o primeiro nome que responder vira a capa; se nenhum
+ * responder, fica o desenho gerado.
+ */
+@Composable
+private fun CatalogCover(entry: com.retrobox.data.CatalogEntry) {
+    val urls = remember(entry.id) {
+        val variants = com.retrobox.emulation.CoverStore.boxArtUrls(entry.console, entry.title)
+        entry.coverUrl?.let { listOf(it) + variants } ?: variants
+    }
+    var index by remember(entry.id) { mutableStateOf(0) }
+
+    if (urls.isEmpty()) {
+        PlaceholderCover(entry.title)
+        return
+    }
+
+    val current = urls[index.coerceIn(0, urls.lastIndex)]
+    SubcomposeAsyncImage(
+        model = current,
+        contentDescription = entry.title,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Crop,
+        loading = { PlaceholderCover(entry.title) },
+        error = {
+            val next = index + 1
+            if (next < urls.size) {
+                LaunchedEffect(urls[next]) { index = next }
+            }
+            PlaceholderCover(entry.title)
+        }
+    )
+}
+
+@Composable
 private fun CatalogCard(
     item: CatalogItem,
     onOpen: (com.retrobox.data.Game) -> Unit,
@@ -217,35 +301,7 @@ private fun CatalogCard(
                     item.installedGame?.let(onOpen)
                 }
         ) {
-            if (entry.coverUrl != null) {
-                AsyncImage(
-                    model = entry.coverUrl,
-                    contentDescription = entry.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(NeonBlue.copy(alpha = 0.22f), SurfaceVariantDark, Color.Black)
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        entry.title,
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(10.dp)
-                    )
-                }
-            }
+            CatalogCover(entry)
 
             if (item.installed) {
                 Surface(

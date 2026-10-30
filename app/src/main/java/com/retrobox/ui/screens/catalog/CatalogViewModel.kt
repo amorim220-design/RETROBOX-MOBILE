@@ -18,6 +18,7 @@ import com.retrobox.emulation.CoverStore
 import com.retrobox.emulation.GameTitle
 import com.retrobox.emulation.RomIdentifier
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,11 +26,13 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+@OptIn(ExperimentalCoroutinesApi::class)
 data class CatalogItem(
     val entry: CatalogEntry,
     val record: DownloadRecord?,
@@ -38,6 +41,7 @@ data class CatalogItem(
     val installed: Boolean get() = installedGame != null
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class CatalogViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as RetroBoxApplication
@@ -48,29 +52,45 @@ class CatalogViewModel(application: Application) : AndroidViewModel(application)
     private val _console = MutableStateFlow<Console?>(null)
     val console: StateFlow<Console?> = _console.asStateFlow()
 
+    private val _search = MutableStateFlow("")
+    val search: StateFlow<String> = _search.asStateFlow()
+
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
     val lastRefresh = preferences.catalogLastRefresh
     val lastError = preferences.catalogLastError
 
+    /** Consolas presentes no catálogo (chips): não muda com a busca. */
+    val consoles: StateFlow<List<Console>> = repository.catalogConsoles
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * Lista do catálogo. Com busca ou console filtrado o app pergunta direto
+     * ao banco (a lista completa tem dezenas de milhares de itens); sem filtro
+     * mostra tudo.
+     */
     val items: StateFlow<List<CatalogItem>> = combine(
-        repository.catalog,
+        combine(_console, _search) { console, search -> console to search }
+            .flatMapLatest { (console, search) ->
+                when {
+                    search.isNotBlank() -> repository.searchCatalog(search, console)
+                    console != null -> repository.getCatalogByConsole(console)
+                    else -> repository.catalog
+                }
+            },
         repository.downloads,
-        repository.allGames,
-        _console
-    ) { entries, downloads, games, console ->
+        repository.allGames
+    ) { entries, downloads, games ->
         val downloadsById = downloads.associateBy { it.catalogId }
         val gamesByCatalog = games.filter { it.catalogId != null }.associateBy { it.catalogId }
-        entries
-            .filter { console == null || it.console == console }
-            .map { entry ->
-                CatalogItem(
-                    entry = entry,
-                    record = downloadsById[entry.id],
-                    installedGame = gamesByCatalog[entry.id]
-                )
-            }
+        entries.map { entry ->
+            CatalogItem(
+                entry = entry,
+                record = downloadsById[entry.id],
+                installedGame = gamesByCatalog[entry.id]
+            )
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _message = MutableSharedFlow<String>(extraBufferCapacity = 2)
@@ -78,6 +98,10 @@ class CatalogViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectConsole(console: Console?) {
         _console.value = console
+    }
+
+    fun setSearch(query: String) {
+        _search.value = query
     }
 
     fun refresh() {
@@ -95,10 +119,11 @@ class CatalogViewModel(application: Application) : AndroidViewModel(application)
                     _message.emit("${r.warnings.size} item(ns) ignorado(s): ${r.warnings.first()}")
                 }
             }.onFailure { e ->
-                val message = when (e) {
+                val raw = when (e) {
                     is CatalogException -> e.message ?: "Catálogo inválido."
                     else -> "Não foi possível atualizar o catálogo: ${e.message}"
                 }
+                val message = raw.take(180)
                 runCatching { preferences.updateCatalogResult(0, message) }
                 _message.emit(message)
             }
@@ -149,6 +174,15 @@ class CatalogViewModel(application: Application) : AndroidViewModel(application)
                             temp.delete()
                             throw IllegalStateException(
                                 "O arquivo não é o esperado (SHA-256 diferente do catálogo)."
+                            )
+                        }
+                    } else if (!entry.md5.isNullOrBlank()) {
+                        // identidade do cartucho (base oficial do libretro)
+                        val md5 = RomIdentifier.md5(temp)
+                        if (!md5.equals(entry.md5, ignoreCase = true)) {
+                            temp.delete()
+                            throw IllegalStateException(
+                                "Esse arquivo não é o jogo escolhido (MD5 diferente do catálogo)."
                             )
                         }
                     }

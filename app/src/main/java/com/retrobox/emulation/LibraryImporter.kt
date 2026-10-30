@@ -233,12 +233,32 @@ object LibraryImporter {
                 }
 
                 // identifica pelo conteúdo: o mesmo jogo renomeado não duplica
-                val sha = RomIdentifier.sha256(destination)
-                if (repository.gameBySha256(sha) != null) {
+                val digests = RomIdentifier.digests(destination)
+                val sha = digests.sha256
+                val identified = RomIdentifier.match(repository, sha, digests.md5)
+                val coverUri = identified?.let { entry ->
+                    entry.coverUrl ?: CoverStore.boxArtUrl(entry.console, entry.title)
+                }
+
+                // já está na biblioteca? aproveita para completar o que falta
+                // (título oficial e capa) em vez de ignorar o arquivo.
+                val existing = repository.gameBySha256(sha)
+                if (existing != null) {
+                    if (existing.catalogId == null && identified != null) {
+                        repository.updateGame(
+                            existing.copy(
+                                title = identified.title,
+                                console = identified.console,
+                                coverUri = coverUri ?: existing.coverUri,
+                                catalogId = identified.id
+                            )
+                        )
+                        identifiedCount++
+                        withCover++
+                    }
                     skipped++
                     return@forEachIndexed
                 }
-                val identified = RomIdentifier.match(repository, sha)
 
                 val title = identified?.title ?: GameTitle.clean(source.name)
                 val inserted = repository.addGame(
@@ -246,7 +266,7 @@ object LibraryImporter {
                         title = title,
                         console = identified?.console ?: console,
                         filePath = destination.absolutePath,
-                        coverUri = identified?.coverUrl,
+                        coverUri = coverUri,
                         rawTitle = source.name,
                         catalogId = identified?.id,
                         sha256 = sha
@@ -259,9 +279,14 @@ object LibraryImporter {
                 imported++
                 if (identified != null) identifiedCount++
 
-                val cover = CoverStore.coverFor(context, identified?.console ?: console, source.name)
-                if (cover != null) {
-                    repository.updateCover(destination.absolutePath, cover)
+                if (coverUri == null) {
+                    // sem identificação no catálogo: tenta a capa pelo nome do arquivo
+                    val cover = CoverStore.coverFor(context, console, source.name)
+                    if (cover != null) {
+                        repository.updateCover(destination.absolutePath, cover)
+                        withCover++
+                    }
+                } else {
                     withCover++
                 }
             } catch (e: Exception) {

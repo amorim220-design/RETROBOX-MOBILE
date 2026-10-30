@@ -24,6 +24,8 @@ emulação rodam no mesmo processo: o usuário não instala RetroArch, PPSSPP ou
 | Controles: overlay multitoque + gamepad físico | ✅ |
 | Save state / SRAM (armazenamento interno do app) | ✅ |
 | **Catálogo remoto assinado (Ed25519) com fallback de hash fixado** | ✅ |
+| **Catálogo completo embutido: 33 mil jogos (GBA, MD, N64, PS1, PSP, SNES)** | ✅ |
+| **Identificação de ROM por MD5: título e capa oficiais do catálogo** | ✅ |
 | **Download com WorkManager: retomada (HTTP Range), SHA-256, notificação** | ✅ |
 | **Gerenciador de BIOS importado pelo usuário (sem BIOS no APK)** | ✅ |
 | **Identificação de ROM por SHA-256/CRC32 + casamento com o catálogo** | ✅ |
@@ -47,6 +49,9 @@ emulação rodam no mesmo processo: o usuário não instala RetroArch, PPSSPP ou
 | Download de 8 MB com SHA-256 | ✅ arquivo só entra na biblioteca depois do hash |
 | Download interrompido (app morto no meio) | ✅ retomou com `206` a partir do `.part` |
 | Backup automático de saves | ✅ zip diário com rotação (mantém 7) |
+| Catálogo completo embutido (33.118 jogos) | ✅ assinado, comprimido (deflate), carregado em ~2 s |
+| Busca no catálogo por nome | ✅ insensível a maiúsculas, até 400 resultados |
+| Identificação por MD5 (base oficial do libretro) | ✅ ROM renomeada vira "Aladdin (USA)" com capa oficial |
 
 ---
 
@@ -221,26 +226,47 @@ apagado.
 
 ### Catálogo assinado
 
-O catálogo é uma lista de **metadados** (título, console, tamanho, SHA-256 e URL
+O catálogo é uma lista de **metadados** (título, console, tamanho, hash, gênero e URL
 opcional). Ele nunca traz ROM nem BIOS, e o app **recusa** um catálogo sem prova de
 origem: assinatura **Ed25519** sobre os bytes do payload ou, em aparelhos sem Ed25519
 (Android < 13), um **SHA-256 fixado** no APK.
 
+**O catálogo embutido tem 33.118 jogos** (GBA, Mega Drive, N64, PS1, PSP e SNES),
+gerado da base oficial do libretro (`libretro/libretro-database`) e assinado com a
+chave `sample`. Ele viaja no APK comprimido em deflate (11,8 MB de JSON → 2,0 MB).
+
 ```powershell
-# assinar o catálogo de exemplo e embutir no APK
-java tools/catalog/CatalogTool.java sign tools/catalog/catalog-payload.json sample `
-    tools/catalog/keys/sample.seed app/src/main/assets/catalog.json
+# regerar o catálogo completo (precisa de internet na primeira vez)
+java tools/catalog/GenerateFullCatalog.java tools/catalog/catalog-full-payload.json
+
+# assinar (comprimido) e embutir no APK
+java tools/catalog/CatalogTool.java sign tools/catalog/catalog-full-payload.json sample `
+    tools/catalog/keys/sample.seed app/src/main/assets/catalog.json --deflate
 
 # conferir
 java tools/catalog/CatalogTool.java verify app/src/main/assets/catalog.json `
     tools/catalog/keys/sample.pub
 ```
 
-Detalhes do envelope, das regras do payload e da rotação de chaves:
+Detalhes do envelope, dos formatos (1 = cru, 2 = deflate) e da rotação de chaves:
 [`tools/catalog/README.md`](tools/catalog/README.md).
 
 Para apontar para um catálogo próprio: **Ajustes → URL do catálogo** (ou
 `RETROBOX_CATALOG_URL` no build). `url` vazio = “traga seu próprio arquivo”.
+
+### Identificação de ROM
+
+Cada item do catálogo traz o **MD5** do cartucho (a mesma identidade da base oficial
+do libretro). Quando você importa um jogo:
+
+1. o app calcula SHA-256 + MD5 + CRC32 do arquivo (uma leitura só);
+2. se o MD5 casar com o catálogo, o jogo entra com o **título oficial** e a **capa
+   oficial** (box art do libretro-thumbnails), mesmo que o arquivo esteja renomeado;
+3. se já estiver na biblioteca, a importação **atualiza** o que falta (título/capa) em
+   vez de duplicar.
+
+É por isso que a lista de 33 mil jogos não é só enfeite: ela é o dicionário que
+transforma “arquivo_do_usuario.smc” em “The Mask (USA)”.
 
 ### Download
 
@@ -291,7 +317,8 @@ adb reverse tcp:8000 tcp:8000
 2. Extração de `.zip`/`.7z` no import (cache do app).
 3. Mapeamento de botões por console (PS1: △○×□ em vez de A/B/X/Y; SNES: layout Nintendo).
 4. UI de opções por núcleo (parsing seguro de `SET_CORE_OPTIONS_V2`).
-5. `libretro-db.sqlite` embutido para identificar ROMs que não estão no catálogo.
+5. `libretro-db.sqlite` embutido para identificar ROMs que não estão no catálogo
+   (hoje a base do libretro já vem embutida como catálogo, com MD5).
 6. Remover a ABI `x86_64` e os núcleos correspondentes antes de publicar.
 7. Assinar a release (`KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`) e publicar.
 

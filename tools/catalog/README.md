@@ -1,7 +1,7 @@
 # Catálogo assinado
 
-O catálogo é só **metadados**: título, console, tamanho, SHA-256 e (opcionalmente)
-uma URL. O APK nunca traz ROM, ISO, BIOS ou chave de jogo — nem o catálogo de
+O catálogo é só **metadados**: título, console, tamanho, hash (MD5/CRC32), gênero e
+URL opcional. O APK nunca traz ROM, ISO, BIOS ou chave de jogo — nem o catálogo de
 exemplo.
 
 O app recusa qualquer catálogo sem prova de origem:
@@ -12,36 +12,64 @@ O app recusa qualquer catálogo sem prova de origem:
 
 Sem uma das duas, nada é gravado em `Room`.
 
+## Formatos do envelope
+
+| Formato | `payload` | Quando usar |
+|---|---|---|
+| 1 | JSON UTF-8 puro | catálogo pequeno (exemplo) |
+| 2 | JSON comprimido em **deflate cru** (sem cabeçalho zlib) | catálogo completo (37 mil jogos → 11,8 MB → 2,0 MB) |
+
+Nos dois casos a assinatura é sobre **exatamente** os bytes que vão no campo
+`payload`, então a verificação acontece antes de descompactar/parsear.
+
 ## Arquivos
 
 | Arquivo | Papel |
 | --- | --- |
 | `CatalogTool.java` | keygen / sign / verify / pin — JDK 17+, sem dependências |
-| `catalog-payload.json` | payload do catálogo de exemplo (editável, versionado) |
+| `GenerateFullCatalog.java` | monta o catálogo completo a partir da base oficial do libretro |
+| `catalog-demo-payload.json` | payload do catálogo de exemplo (6 itens de homebrew) |
+| `catalog-full-payload.json` | payload completo gerado (não versionado: 11,8 MB) |
 | `keys/<id>.seed` | chave privada (**não versionada**, ver `.gitignore`) |
 | `keys/<id>.pub` | chave pública (32 bytes em base64) |
 | `app/src/main/assets/catalog.json` | envelope assinado embutido no APK |
 
-## Fluxo
+## Catálogo completo (37.253 jogos)
+
+A base oficial do libretro (`libretro/libretro-database`) tem um `.rdb` por
+console — MessagePack com `name`, `rom_name`, `size`, `crc`, `md5`, `sha1`,
+`genre`, `developer`, `releaseyear`. O gerador lê isso e monta o JSON:
 
 ```powershell
-# 1. par de chaves (uma vez; guarde o .seed fora do git)
-java tools/catalog/CatalogTool.java keygen sample tools/catalog/keys
+# 1) baixa os .rdb (cache em tools/catalog/cache) e gera o payload
+java tools/catalog/GenerateFullCatalog.java tools/catalog/catalog-full-payload.json
 
-# 2. cole o valor do .pub em CatalogKeys.kt (chave "sample") ou exporte
-#    RETROBOX_CATALOG_PUBLIC_KEY / RETROBOX_CATALOG_KEY_ID no build
+# 2) assina (comprimido, formato 2) para o asset do APK
+java tools/catalog/CatalogTool.java sign tools/catalog/catalog-full-payload.json sample `
+    tools/catalog/keys/sample.seed app/src/main/assets/catalog.json --deflate
 
-# 3. edite o payload e assine para o asset embutido
-java tools/catalog/CatalogTool.java sign tools/catalog/catalog-payload.json sample `
-    tools/catalog/keys/sample.seed app/src/main/assets/catalog.json
-
-# 4. confira (falha com código 1 se a assinatura não bater)
+# 3) confere (a assinatura é sobre o payload comprimido)
 java tools/catalog/CatalogTool.java verify app/src/main/assets/catalog.json `
     tools/catalog/keys/sample.pub
 ```
 
-Para publicar por URL (catálogo do operador), assine com a chave do operador e
-suba o envelope em qualquer host HTTPS:
+Consolas cobertas: **GBA, Mega Drive, N64, PS1, PSP e SNES**.
+
+O MD5 é a identidade do cartucho: com ele o app reconhece a ROM do usuário mesmo
+renomeada, mostra o título oficial e a capa certa, e recusa um arquivo que não
+seja o jogo escolhido.
+
+## Chave de exemplo
+
+```powershell
+java tools/catalog/CatalogTool.java keygen sample tools/catalog/keys
+```
+
+A chave privada (seed) **não** vai para o repositório. Para trocar a chave:
+gere um par novo, cole o `.pub` em `CatalogKeys.kt` (ou use
+`RETROBOX_CATALOG_PUBLIC_KEY` no build) e assine de novo o catálogo.
+
+## Catálogo remoto (operador)
 
 ```powershell
 $env:RETROBOX_CATALOG_URL        = "https://exemplo.com/catalog.json"
@@ -58,29 +86,27 @@ tem prioridade sobre o valor do build).
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "keyId": "sample",
-  "payload": "<base64 do JSON>",
+  "payload": "<base64 do payload (comprimido quando format=2)>",
   "signature": "<base64 Ed25519 (64 bytes) sobre os bytes do payload>"
 }
 ```
-
-Assinar o *payload* (e não o envelope) permite evoluir o envelope sem quebrar
-assinaturas antigas.
 
 ## Regras do payload
 
 `{ "version": Int, "updatedAt": String, "entries": [...] }` — cada entrada:
 
 | Campo | Regra |
-| --- | --- |
+|---|---|
 | `id` | `[a-z0-9][a-z0-9._-]{1,63}`, único |
 | `title` | obrigatório |
 | `console` | `nes`, `snes`, `gb`, `gbc`, `gba`, `megadrive`, `ps1`, `psp`, `n64`, `nds` |
 | `url` | `https://` (ou `http://` em `127.0.0.1`/`localhost`/`10.0.2.2`, só dev) |
 | `sha256` | **obrigatório quando há `url`** — é a única prova de integridade |
+| `md5` / `crc32` | identidade do cartucho (usada para reconhecer a ROM do usuário) |
 | `sizeBytes` | usado para reservar espaço e checar o download |
-| `coverUrl` | `https://` opcional |
+| `coverUrl` | `https://` opcional — sem ele o app monta a URL da box art pelo título |
 
 `url: null` significa “traga seu próprio arquivo”: o app mostra o jogo e pede o
 arquivo ao usuário.
@@ -91,5 +117,3 @@ arquivo ao usuário.
   confiável (idealmente offline) e publique só o envelope.
 - Rotacionar chave exige uma nova versão do app (a chave pública está no APK).
   Mantenha a chave antiga em `CatalogKeys` durante a transição.
-- O catálogo de exemplo (`sample`) não aponta para nenhum arquivo — só existe
-  para o app ter uma lista na primeira execução.

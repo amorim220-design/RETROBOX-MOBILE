@@ -56,7 +56,7 @@ class CatalogRepository(
         }
 
         val verified = CatalogVerifier.verify(bytes)
-        val payload = parse(verified.payloadBytes)
+        val payload = parse(verified.jsonBytes)
         val (entries, warnings) = validate(payload)
 
         gameRepository.replaceCatalog(entries)
@@ -77,14 +77,45 @@ class CatalogRepository(
     }
 
     /**
-     * Garante que existe catálogo na primeira execução. Falhas são silenciosas
-     * (o app continua utilizável com a biblioteca local).
+     * Garante que existe catálogo na primeira execução.
+     *
+     * Com o catálogo **embutido** no APK, recarrega quando o asset muda (nova
+     * versão do app); com URL remota, só busca na primeira vez (depois é o
+     * botão "Atualizar"). Falhas são silenciosas: o app continua utilizável
+     * com a biblioteca local.
      */
     suspend fun ensureLoaded(): Boolean = withContext(Dispatchers.IO) {
+        val url = preferences.catalogUrl.first().ifBlank { BuildConfig.CATALOG_URL.trim() }
+
+        if (url.isBlank()) {
+            val signature = assetSignature()
+            if (signature != null && signature != preferences.catalogAssetSignature.first()) {
+                val ok = runCatching { refresh(force = false) }.isSuccess
+                if (ok) preferences.updateCatalogAssetSignature(signature)
+                return@withContext ok
+            }
+        }
+
         if (gameRepository.catalogCount() > 0) return@withContext true
         runCatching { refresh(force = false) }.onFailure {
             Log.w("RetroBoxCatalog", "catálogo inicial não carregado: ${it.message}")
         }.isSuccess
+    }
+
+    /** SHA-256 do asset de catálogo embutido (o app sabe quando ele muda). */
+    private suspend fun assetSignature(): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            context.assets.open("catalog.json").use { input ->
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+                digest.digest().joinToString("") { "%02x".format(it) }
+            }
+        }.getOrNull()
     }
 
     /** Liga o arquivo importado ao item do catálogo (para não "perder" a origem). */
@@ -130,7 +161,10 @@ class CatalogRepository(
         val payload = try {
             payloadAdapter.fromJson(payloadBytes.toString(Charsets.UTF_8))
         } catch (e: Exception) {
-            throw CatalogException("Conteúdo do catálogo inválido.", e)
+            throw CatalogException(
+                "Conteúdo do catálogo inválido: ${e.javaClass.simpleName}: ${e.message}",
+                e
+            )
         } ?: throw CatalogException("Conteúdo do catálogo vazio.")
         if (payload.version <= 0) throw CatalogException("Versão do catálogo inválida.")
         return payload
@@ -170,6 +204,13 @@ class CatalogRepository(
                 return@forEach
             }
 
+            val md5 = dto.md5?.trim()?.lowercase()?.takeIf { MD5_PATTERN.matches(it) }
+            val crc32 = dto.crc32?.trim()?.lowercase()?.takeIf { CRC32_PATTERN.matches(it) }
+            if (!md5.isNullOrEmpty() && md5 == ZERO_HASH) {
+                warnings += "'${dto.title}' ignorado: MD5 vazio."
+                return@forEach
+            }
+
             val fileName = sanitizeFileName(
                 dto.fileName?.takeIf { it.isNotBlank() }
                     ?: "${dto.id}.${console.extensions.first()}"
@@ -193,7 +234,10 @@ class CatalogRepository(
                 releaseYear = dto.releaseYear?.takeIf { it in 1970..2100 },
                 region = dto.region?.trim()?.takeIf { it.isNotBlank() },
                 catalogVersion = payload.version,
-                addedAt = System.currentTimeMillis()
+                addedAt = System.currentTimeMillis(),
+                md5 = md5,
+                crc32 = crc32,
+                genre = dto.genre?.trim()?.takeIf { it.isNotBlank() }
             )
         }
 
@@ -228,8 +272,11 @@ class CatalogRepository(
             .take(120)
 
     companion object {
-        private const val MAX_CATALOG_BYTES = 8 * 1024 * 1024L
+        private const val MAX_CATALOG_BYTES = 32 * 1024 * 1024L
         private val ID_PATTERN = Regex("[a-z0-9][a-z0-9._-]{1,63}")
         private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
+        private val MD5_PATTERN = Regex("[a-f0-9]{32}")
+        private val CRC32_PATTERN = Regex("[a-f0-9]{8}")
+        private const val ZERO_HASH = "00000000000000000000000000000000"
     }
 }

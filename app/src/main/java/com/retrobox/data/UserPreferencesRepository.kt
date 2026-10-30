@@ -25,6 +25,8 @@ class UserPreferencesRepository(private val context: Context) {
         val CATALOG_LAST_REFRESH = longPreferencesKey("catalog_last_refresh")
         val CATALOG_LAST_VERSION = intPreferencesKey("catalog_last_version")
         val CATALOG_LAST_ERROR = stringPreferencesKey("catalog_last_error")
+        /** Assinatura (SHA-256) do asset embutido já carregado. */
+        val CATALOG_ASSET_SIGNATURE = stringPreferencesKey("catalog_asset_signature")
         val LAST_BIOS_CHECK = longPreferencesKey("last_bios_check")
 
         // Configurações de vídeo/execução, por console.
@@ -56,6 +58,14 @@ class UserPreferencesRepository(private val context: Context) {
     val catalogLastVersion: Flow<Int> = context.dataStore.data.map { it[PreferencesKeys.CATALOG_LAST_VERSION] ?: 0 }
 
     val catalogLastError: Flow<String?> = context.dataStore.data.map { it[PreferencesKeys.CATALOG_LAST_ERROR] }
+
+    /** SHA-256 do catálogo embutido que já foi carregado (para recarregar se mudar). */
+    val catalogAssetSignature: Flow<String> =
+        context.dataStore.data.map { it[PreferencesKeys.CATALOG_ASSET_SIGNATURE].orEmpty() }
+
+    suspend fun updateCatalogAssetSignature(signature: String) {
+        context.dataStore.edit { it[PreferencesKeys.CATALOG_ASSET_SIGNATURE] = signature }
+    }
 
     suspend fun updateCatalogUrl(url: String) {
         context.dataStore.edit { it[PreferencesKeys.CATALOG_URL] = url.trim() }

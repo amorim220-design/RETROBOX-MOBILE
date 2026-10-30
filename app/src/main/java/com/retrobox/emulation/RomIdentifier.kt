@@ -10,22 +10,54 @@ import java.util.zip.CRC32
 /**
  * Identificação de ROM sem depender do libretro-db completo.
  *
- * Calcula SHA-256, CRC32 e o *serial* que fica no cabeçalho de cada cartucho.
- * O catálogo guarda o SHA-256, então a identificação é exata mesmo se o
- * arquivo foi renomeado. O serial/CRC ficam disponíveis para quando o
- * `libretro-db.sqlite` for embutido (é só trocar [match] por uma consulta).
+ * Calcula SHA-256, CRC32, MD5 e o *serial* que fica no cabeçalho de cada
+ * cartucho. O catálogo guarda o MD5 (mesma base oficial do libretro), então a
+ * identificação é exata mesmo se o arquivo foi renomeado.
  */
 object RomIdentifier {
 
     data class Fingerprint(
         val sha256: String,
+        val md5: String,
         val crc32: Long,
         val serial: String?,
         val sizeBytes: Long
     )
 
-    fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
+    fun sha256(file: File): String = digest(file, "SHA-256")
+
+    /** MD5 do cartucho — a identidade usada pela base do libretro. */
+    fun md5(file: File): String = digest(file, "MD5")
+
+    /**
+     * SHA-256, MD5 e CRC32 numa leitura só (importar dozens de ROMs não
+     * pode ler o arquivo três vezes).
+     */
+    fun digests(file: File): Digests {
+        val sha = MessageDigest.getInstance("SHA-256")
+        val md5 = MessageDigest.getInstance("MD5")
+        val crc = CRC32()
+        file.inputStream().use { input ->
+            val buffer = ByteArray(256 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                sha.update(buffer, 0, read)
+                md5.update(buffer, 0, read)
+                crc.update(buffer, 0, read)
+            }
+        }
+        return Digests(
+            sha256 = sha.digest().joinToString("") { "%02x".format(it) },
+            md5 = md5.digest().joinToString("") { "%02x".format(it) },
+            crc32 = crc.value
+        )
+    }
+
+    data class Digests(val sha256: String, val md5: String, val crc32: Long)
+
+    private fun digest(file: File, algorithm: String): String {
+        val digest = MessageDigest.getInstance(algorithm)
         file.inputStream().use { input ->
             val buffer = ByteArray(256 * 1024)
             while (true) {
@@ -49,15 +81,25 @@ object RomIdentifier {
         }
         return Fingerprint(
             sha256 = sha256(file),
+            md5 = md5(file),
             crc32 = crc.value,
             serial = console?.let { readSerial(file, it) },
             sizeBytes = file.length()
         )
     }
 
-    /** Casa o arquivo com um item do catálogo pelo SHA-256. */
-    suspend fun match(repository: GameRepository, sha256: String): CatalogEntry? =
-        repository.catalogEntryBySha256(sha256)
+    /**
+     * Casa o arquivo com um item do catálogo.
+     *
+     * A ordem é: SHA-256 (exato) → MD5 (identidade do cartucho) → CRC32.
+     */
+    suspend fun match(repository: GameRepository, sha256: String, md5: String? = null): CatalogEntry? {
+        repository.catalogEntryBySha256(sha256)?.let { return it }
+        if (!md5.isNullOrBlank()) {
+            repository.catalogEntryByMd5(md5)?.let { return it }
+        }
+        return null
+    }
 
     /**
      * Serial do cartucho, quando o formato tem um. Best-effort: arquivo

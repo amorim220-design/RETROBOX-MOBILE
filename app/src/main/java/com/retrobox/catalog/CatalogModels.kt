@@ -12,6 +12,11 @@ import com.squareup.moshi.JsonClass
  * `payload` são os bytes UTF-8 do JSON do catálogo; `signature` é Ed25519
  * sobre exatamente esses bytes (não sobre o envelope). Assim o parser pode
  * mudar sem quebrar a assinatura.
+ *
+ * **Formato 2**: o `payload` é o JSON comprimido em deflate (cru, sem cabeçalho
+ * zlib). A assinatura continua cobrindo os bytes do payload, então a
+ * verificação acontece *antes* de descompactar — um payload adulterado nunca
+ * chega ao parser. O formato 1 (sem compressão) continua aceito.
  */
 @JsonClass(generateAdapter = true)
 data class CatalogEnvelope(
@@ -41,7 +46,13 @@ data class CatalogEntryDto(
     val description: String? = null,
     val developer: String? = null,
     val releaseYear: Int? = null,
-    val region: String? = null
+    val region: String? = null,
+    /** MD5 do cartucho (identidade do jogo). */
+    val md5: String? = null,
+    /** CRC32 do cartucho. */
+    val crc32: String? = null,
+    /** Gênero do jogo. */
+    val genre: String? = null
 )
 
 class CatalogException(message: String, cause: Throwable? = null) : Exception(message, cause)

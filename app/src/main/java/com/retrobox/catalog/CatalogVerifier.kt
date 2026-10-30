@@ -4,10 +4,13 @@ import android.util.Base64
 import android.util.Log
 import com.retrobox.BuildConfig
 import com.squareup.moshi.Moshi
+import java.io.ByteArrayOutputStream
 import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
+import java.util.zip.DataFormatException
+import java.util.zip.Inflater
 
 /**
  * Verifica o catálogo antes de confiar nele.
@@ -27,7 +30,8 @@ import java.security.spec.X509EncodedKeySpec
 object CatalogVerifier {
 
     private const val TAG = "RetroBoxCatalog"
-    private const val MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+    private const val MAX_PAYLOAD_BYTES = 32 * 1024 * 1024
+    private const val MAX_JSON_BYTES = 48 * 1024 * 1024
 
     /** Prefixo ASN.1 de uma chave pública Ed25519 (SPKI) + os 32 bytes crus. */
     private val ED25519_SPKI_PREFIX = byteArrayOf(
@@ -38,7 +42,9 @@ object CatalogVerifier {
         val payloadBytes: ByteArray,
         val keyId: String,
         /** true = assinatura Ed25519 válida; false = aceito só pelo hash fixado. */
-        val signatureVerified: Boolean
+        val signatureVerified: Boolean,
+        /** JSON do catálogo (já descompactado quando o envelope é formato 2). */
+        val jsonBytes: ByteArray
     )
 
     private val moshi: Moshi = Moshi.Builder().build()
@@ -51,7 +57,7 @@ object CatalogVerifier {
             throw CatalogException("Catálogo ilegível (JSON inválido).", e)
         } ?: throw CatalogException("Catálogo vazio.")
 
-        if (envelope.format != 1) {
+        if (envelope.format != 1 && envelope.format != 2) {
             throw CatalogException("Formato de catálogo não suportado (${envelope.format}).")
         }
 
@@ -65,26 +71,57 @@ object CatalogVerifier {
         val signature = runCatching { Base64.decode(envelope.signature, Base64.NO_WRAP) }
             .getOrElse { byteArrayOf() }
 
-        if (signature.size == 64 && verifyEd25519(payload, signature, envelope.keyId)) {
-            return Verified(payload, envelope.keyId, signatureVerified = true)
+        val verified = verifySignature(payload, signature, envelope.keyId)
+            ?: throw CatalogException("Catálogo recusado: ${reasonFor(envelope.keyId, signature)}.")
+
+        // A assinatura cobre os bytes do payload: só agora descompactamos.
+        val json = if (envelope.format == 2) inflate(payload) else payload
+        if (json.size > MAX_JSON_BYTES) {
+            throw CatalogException("Catálogo grande demais (${json.size} bytes).")
         }
+        return Verified(payload, envelope.keyId, verified, json)
+    }
+
+    /** true = Ed25519 conferiu; false = aceito pelo hash fixado; null = recusado. */
+    private fun verifySignature(payload: ByteArray, signature: ByteArray, keyId: String): Boolean? {
+        if (signature.size == 64 && verifyEd25519(payload, signature, keyId)) return true
 
         val pinned = BuildConfig.CATALOG_PINNED_SHA256.trim().lowercase()
         if (pinned.length == 64 && sha256Hex(payload) == pinned) {
             Log.w(TAG, "catálogo aceito pelo hash fixado (sem Ed25519 neste aparelho)")
-            return Verified(payload, envelope.keyId.ifBlank { "pinned" }, signatureVerified = false)
+            return false
         }
+        return null
+    }
 
-        val reason = if (signature.isEmpty()) {
-            "sem assinatura"
-        } else if (CatalogKeys.publicKey(envelope.keyId) == null) {
-            "chave '${envelope.keyId}' desconhecida"
-        } else if (!ed25519Supported()) {
+    private fun reasonFor(keyId: String, signature: ByteArray): String = when {
+        signature.isEmpty() -> "sem assinatura"
+        CatalogKeys.publicKey(keyId) == null -> "chave '$keyId' desconhecida"
+        !ed25519Supported() ->
             "este Android não oferece Ed25519 e não há hash fixado para este catálogo"
-        } else {
-            "assinatura inválida"
+        else -> "assinatura inválida"
+    }
+
+    /** Descompacta um payload no formato 2 (deflate cru). */
+    private fun inflate(payload: ByteArray): ByteArray {
+        val inflater = Inflater(true)
+        return try {
+            inflater.setInput(payload)
+            val out = ByteArrayOutputStream(payload.size * 6)
+            val buffer = ByteArray(64 * 1024)
+            while (!inflater.finished()) {
+                val n = try {
+                    inflater.inflate(buffer)
+                } catch (e: DataFormatException) {
+                    throw CatalogException("Catálogo corrompido (payload ilegível).", e)
+                }
+                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+                out.write(buffer, 0, n)
+            }
+            out.toByteArray()
+        } finally {
+            inflater.end()
         }
-        throw CatalogException("Catálogo recusado: $reason.")
     }
 
     private fun verifyEd25519(payload: ByteArray, signature: ByteArray, keyId: String): Boolean {

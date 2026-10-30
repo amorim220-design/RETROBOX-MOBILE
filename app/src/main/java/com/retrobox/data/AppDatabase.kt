@@ -8,7 +8,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Game::class, CatalogEntry::class, DownloadRecord::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -77,6 +77,21 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+            }
+        }
+        /**
+         * v4: identidade das ROMs pelo catálogo oficial.
+         *
+         * - `md5` e `crc32` identificam o cartucho (mesma base do libretro);
+         * - `genre` mostra o gênero na tela do catálogo.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE catalog ADD COLUMN md5 TEXT")
+                db.execSQL("ALTER TABLE catalog ADD COLUMN crc32 TEXT")
+                db.execSQL("ALTER TABLE catalog ADD COLUMN genre TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_md5` ON `catalog` (`md5`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_catalog_console` ON `catalog` (`console`)")
             }
         }
     }

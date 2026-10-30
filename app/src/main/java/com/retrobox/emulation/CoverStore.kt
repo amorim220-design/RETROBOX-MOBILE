@@ -21,25 +21,57 @@ import java.net.URLEncoder
 object CoverStore {
 
     private const val TAG = "RetroBoxCover"
-    private const val BASE = "https://raw.githubusercontent.com/libretro-thumbnails"
+    /**
+     * Repositorio oficial de thumbnails do libretro. O caminho mudou: as
+     * pastas usam espaco e o repo vive em `libretro/libretro-thumbnails`
+     * (a URL antiga, com sublinhado, responde 404).
+     */
+    private const val BASE = "https://raw.githubusercontent.com/libretro/libretro-thumbnails/master"
     private const val MAX_WIDTH = 480
     private const val TIMEOUT_MS = 8000
 
     /** Repositorio de thumbnails de cada sistema. */
     private val REPOSITORIES = mapOf(
-        Console.NES to "Nintendo_-_Nintendo_Entertainment_System",
-        Console.SNES to "Nintendo_-_Super_Nintendo_Entertainment_System",
-        Console.GB to "Nintendo_-_Game_Boy",
-        Console.GBC to "Nintendo_-_Game_Boy_Color",
-        Console.GBA to "Nintendo_-_Game_Boy_Advance",
-        Console.MEGADRIVE to "Sega_-_Mega_Drive_-_Genesis",
-        Console.N64 to "Nintendo_-_Nintendo_64",
-        Console.PS1 to "Sony_-_PlayStation",
-        Console.PSP to "Sony_-_PlayStation_Portable"
+        Console.NES to "Nintendo - Nintendo Entertainment System",
+        Console.SNES to "Nintendo - Super Nintendo Entertainment System",
+        Console.GB to "Nintendo - Game Boy",
+        Console.GBC to "Nintendo - Game Boy Color",
+        Console.GBA to "Nintendo - Game Boy Advance",
+        Console.MEGADRIVE to "Sega - Mega Drive - Genesis",
+        Console.N64 to "Nintendo - Nintendo 64",
+        Console.PS1 to "Sony - PlayStation",
+        Console.PSP to "Sony - PlayStation Portable",
+        Console.NDS to "Nintendo - Nintendo DS"
     )
 
     /** Pastas do repositorio: box art (capa de caixa) e snapshot (foto da tela). */
     private val FOLDERS = listOf("Named_Boxarts", "Named_Snaps")
+
+    /**
+     * URL da box art de um jogo pelo titulo oficial (o nome do arquivo no
+     * repositorio e o proprio titulo). Usado pelo catalogo: a lista completa
+     * mostra a capa oficial sem precisar guardar a URL no catalogo.
+     */
+    fun boxArtUrl(console: Console, title: String): String? {
+        val repository = REPOSITORIES[console] ?: return null
+        val clean = title.trim()
+        if (clean.isEmpty()) return null
+        return "$BASE/$repository/Named_Boxarts/" + encode(clean) + ".png"
+    }
+
+    /**
+     * Lista de URLs candidatas para a capa (titulo exato e variações). O Coil
+     * tenta na ordem até uma responder: no catálogo o nome do jogo e o do
+     * arquivo de arte nem sempre são idênticos.
+     */
+    fun boxArtUrls(console: Console, title: String): List<String> {
+        val exact = boxArtUrl(console, title) ?: return emptyList()
+        val urls = linkedSetOf(exact)
+        GameTitle.variants(title).take(4).forEach { variant ->
+            boxArtUrl(console, variant)?.let { urls += it }
+        }
+        return urls.toList()
+    }
 
     /**
      * Procura a capa de um jogo. Devolve o caminho do arquivo local ou null
@@ -56,7 +88,7 @@ object CoverStore {
 
             for (variant in variants) {
                 for (folder in FOLDERS) {
-                    val url = "$BASE/$repository/master/$folder/" + encode(variant) + ".png"
+                    val url = "$BASE/$repository/$folder/" + encode(variant) + ".png"
                     if (!exists(url)) continue
                     val file = cacheFile(context, console, variant)
                     if (file.exists() && file.length() > 0L) return@withContext file.absolutePath

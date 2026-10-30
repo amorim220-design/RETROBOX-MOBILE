@@ -83,7 +83,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             _message.emit("Atualizando catálogo…")
             runCatching { catalog.refresh(force = true) }
                 .onSuccess { _message.emit("Catálogo v${it.version}: ${it.count} itens") }
-                .onFailure { _message.emit(it.message ?: "Falha ao atualizar o catálogo") }
+                .onFailure {
+                    val raw = it.message ?: "Falha ao atualizar o catálogo"
+                    _message.emit(raw.take(180))
+                    runCatching {
+                        preferences.updateCatalogResult(0, raw.take(180))
+                    }
+                }
             refreshAll()
         }
     }

@@ -32,3 +32,8 @@ tools/catalog/keys/
 my-upload-key.jks
 keystore.properties
 
+
+# cache do gerador de catalogo (arquivos .rdb e payload gigante)
+tools/catalog/cache/
+tools/catalog/catalog-full-payload.json
+
