@@ -27,21 +27,30 @@ class HomeViewModel(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    /**
+     * Biblioteca: só entra o que veio do catálogo (baixado ou "use seu arquivo").
+     * Arquivos soltos na pasta do app que não batem com o catálogo ficam de fora.
+     */
+    private val library = gameRepository.allGames
+        .map { list -> list.filter { it.catalogId != null } }
+
     val games: StateFlow<List<Game>> = combine(
         selectedConsole,
         searchQuery,
-        gameRepository.allGames
+        library
     ) { console, query, allGames ->
         allGames.filter { it.console == console && it.title.contains(query, ignoreCase = true) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentGames: StateFlow<List<Game>> = gameRepository.recentGames
+        .map { list -> list.filter { it.catalogId != null } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allGames: StateFlow<List<Game>> = gameRepository.allGames
+    val allGames: StateFlow<List<Game>> = library
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favoriteGames: StateFlow<List<Game>> = gameRepository.favoriteGames
+        .map { list -> list.filter { it.catalogId != null } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {

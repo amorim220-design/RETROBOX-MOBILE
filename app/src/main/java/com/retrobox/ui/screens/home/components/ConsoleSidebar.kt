@@ -47,7 +47,7 @@ fun ConsoleSidebar(
             contentPadding = PaddingValues(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(Console.values()) { console ->
+            items(Console.supported) { console ->
                 ConsoleItem(
                     console = console,
                     isSelected = console == selectedConsole,

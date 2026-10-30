@@ -18,6 +18,9 @@ enum class Console(
     NDS("nds", "Nintendo DS", listOf("nds", "zip"), null);
 
     companion object {
+        /** Os únicos consoles que o app oferece (catálogo, barra lateral e biblioteca). */
+        val supported: List<Console> = listOf(SNES, GBA, MEGADRIVE, PS1, PSP, N64)
+
         fun fromExtension(extension: String): Console? {
             val ext = extension.lowercase()
             return entries.firstOrNull { ext in it.extensions }
