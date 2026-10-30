@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.retrobox.data.DownloadState
 import com.retrobox.data.Game
 import com.retrobox.data.GameRepository
 import com.retrobox.data.UserPreferencesRepository
@@ -28,11 +29,16 @@ class HomeViewModel(
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     /**
-     * Biblioteca: só entra o que veio do catálogo (baixado ou "use seu arquivo").
-     * Arquivos soltos na pasta do app que não batem com o catálogo ficam de fora.
+     * Biblioteca: só entra o que foi baixado do catálogo ou trazido pelo
+     * "use seu arquivo" (download concluído). Jogos da pasta do app ficam de fora,
+     * mesmo quando batem com o catálogo.
      */
-    private val library = gameRepository.allGames
-        .map { list -> list.filter { it.catalogId != null } }
+    private val completedIds = gameRepository.downloads
+        .map { list -> list.filter { it.state == DownloadState.COMPLETED }.map { it.catalogId }.toSet() }
+
+    private val library = combine(gameRepository.allGames, completedIds) { games, ids ->
+        games.filter { it.catalogId != null && it.catalogId in ids }
+    }
 
     val games: StateFlow<List<Game>> = combine(
         selectedConsole,
@@ -42,16 +48,16 @@ class HomeViewModel(
         allGames.filter { it.console == console && it.title.contains(query, ignoreCase = true) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val recentGames: StateFlow<List<Game>> = gameRepository.recentGames
-        .map { list -> list.filter { it.catalogId != null } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val recentGames: StateFlow<List<Game>> = combine(gameRepository.recentGames, completedIds) { list, ids ->
+        list.filter { it.catalogId != null && it.catalogId in ids }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allGames: StateFlow<List<Game>> = library
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val favoriteGames: StateFlow<List<Game>> = gameRepository.favoriteGames
-        .map { list -> list.filter { it.catalogId != null } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val favoriteGames: StateFlow<List<Game>> = combine(gameRepository.favoriteGames, completedIds) { list, ids ->
+        list.filter { it.catalogId != null && it.catalogId in ids }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {
