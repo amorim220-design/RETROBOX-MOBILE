@@ -20,7 +20,7 @@ object CoreRegistry {
 
     val cores: List<CoreInfo> = listOf(
         CoreInfo("fceumm", "FCEUmm", "libfceumm_libretro.so", listOf(Console.NES)),
-        CoreInfo("snes9x2005_plus", "Snes9x 2005 Plus", "libsnes9x2005_plus_libretro.so", listOf(Console.SNES)),
+        CoreInfo("snes9x", "Snes9x", "libsnes9x_libretro.so", listOf(Console.SNES)),
         CoreInfo("gambatte", "Gambatte", "libgambatte_libretro.so", listOf(Console.GB, Console.GBC)),
         CoreInfo("mgba", "mGBA", "libmgba_libretro.so", listOf(Console.GBA)),
         CoreInfo("genesis_plus_gx", "Genesis Plus GX", "libgenesis_plus_gx_libretro.so", listOf(Console.MEGADRIVE)),

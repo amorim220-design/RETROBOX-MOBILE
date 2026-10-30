@@ -50,6 +50,9 @@ object LibraryImporter {
     /** Extensoes copiadas junto (tracks de CD, imagens de disco). */
     private val SUPPORT_EXTENSIONS = setOf("bin", "iso", "mdf", "img", "cue")
 
+    private const val APP_FOLDER_PREFS = "app_folder_import"
+    private const val APP_FOLDER_KEY = "imported_keys"
+
     /** Pastas que identificam o console. */
     private val FOLDER_CONSOLES = mapOf(
         "NES" to Console.NES,
@@ -157,27 +160,42 @@ object LibraryImporter {
         if (!root.isDirectory) {
             return@withContext Result(0, 0, 0, emptyList())
         }
+        val prefs = context.getSharedPreferences(APP_FOLDER_PREFS, Context.MODE_PRIVATE)
+        val known = prefs.getStringSet(APP_FOLDER_KEY, emptySet()).orEmpty()
+        val newKeys = mutableSetOf<String>()
         val sources = mutableListOf<Source>()
-        collectFiles(root, null, "", sources)
+        collectFiles(root, null, "", sources, known, newKeys)
         if (sources.isEmpty()) return@withContext Result(0, 0, 0, emptyList())
-        process(context, sources, repository, onProgress)
+        val result = process(context, sources, repository, onProgress)
+        prefs.edit().putStringSet(APP_FOLDER_KEY, known + newKeys).apply()
+        result
     }
 
     private fun collectFiles(
         directory: File,
         consoleFolder: String?,
         relativePrefix: String,
-        out: MutableList<Source>
+        out: MutableList<Source>,
+        known: Set<String>,
+        newKeys: MutableSet<String>
     ) {
         val children = directory.listFiles() ?: return
         for (child in children) {
             if (child.isDirectory) {
                 val folder = FOLDER_CONSOLES[child.name.trim().uppercase()]?.let { child.name } ?: consoleFolder
-                collectFiles(child, folder, if (relativePrefix.isEmpty()) child.name else "$relativePrefix/${child.name}", out)
+                collectFiles(
+                    child, folder,
+                    if (relativePrefix.isEmpty()) child.name else "$relativePrefix/${child.name}",
+                    out, known, newKeys
+                )
             } else {
                 val extension = child.name.substringAfterLast('.', "").lowercase()
                 if (extension in ENTRY_EXTENSIONS || extension in SUPPORT_EXTENSIONS) {
                     val relative = if (relativePrefix.isEmpty()) child.name else "$relativePrefix/${child.name}"
+                    // já importado nesta instalação: não copia de novo a cada abertura
+                    val key = "$relative|${child.length()}|${child.lastModified()}"
+                    if (key in known) continue
+                    newKeys += key
                     out += Source(
                         name = child.name,
                         folder = consoleFolder,
