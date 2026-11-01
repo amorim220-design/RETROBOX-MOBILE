@@ -117,9 +117,9 @@ object CoverStore {
         url: String,
         seed: String
     ): String? = withContext(Dispatchers.IO) {
-        if (!url.startsWith("https://") && !url.startsWith("http://localhost") &&
-            !url.startsWith("http://127.0.0.1")
-        ) return@withContext null
+        // A URL vem de um catálogo assinado; o que barra HTTP para hosts
+        // desconhecidos é o network security config do Android.
+        if (!url.startsWith("https://") && !url.startsWith("http://")) return@withContext null
         val target = cacheFile(context, console, "url:$seed")
         if (target.exists() && target.length() > 0L) return@withContext target.absolutePath
         if (download(url, target)) target.absolutePath else null

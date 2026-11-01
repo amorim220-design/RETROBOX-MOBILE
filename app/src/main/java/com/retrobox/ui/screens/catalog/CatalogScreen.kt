@@ -253,11 +253,11 @@ private fun PlaceholderCover(title: String) {
  */
 @Composable
 private fun CatalogCover(entry: com.retrobox.data.CatalogEntry) {
-    val urls = remember(entry.id) {
+    val urls = remember(entry.id, entry.coverUrl) {
         val variants = com.retrobox.emulation.CoverStore.boxArtUrls(entry.console, entry.title)
         entry.coverUrl?.let { listOf(it) + variants } ?: variants
     }
-    var index by remember(entry.id) { mutableStateOf(0) }
+    var index by remember(entry.id, entry.coverUrl) { mutableStateOf(0) }
 
     if (urls.isEmpty()) {
         PlaceholderCover(entry.title)

@@ -1,21 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    HTTPS obrigatorio para catalogo, downloads e capas.
+    O catalogo do usuario pode vir do PC dele na rede local (http://192.168.x.x)
+    e esse endereco e configuravel em Ajustes — nao da para fixar o host aqui.
 
-    A unica excecao e o servidor de desenvolvimento local (adb reverse usa
-    127.0.0.1; o emulador Android usa 10.0.2.2). Sem isso nao da para testar o
-    downloader com um servidor HTTP sem colocar o app em modo inseguro.
+    Por isso o cleartext e permitido: a integridade nao depende do transporte.
+    O catalogo e assinado com Ed25519 (ver CatalogVerifier) e cada download so
+    entra na biblioteca se o SHA-256 bater (ver RomDownloader). HTTPS continua
+    sendo usado quando o servidor oferece.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">localhost</domain>
-        <domain includeSubdomains="false">10.0.2.2</domain>
-    </domain-config>
 </network-security-config>

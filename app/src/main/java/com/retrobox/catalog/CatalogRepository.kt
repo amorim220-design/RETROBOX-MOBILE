@@ -57,7 +57,7 @@ class CatalogRepository(
 
         val verified = CatalogVerifier.verify(bytes)
         val payload = parse(verified.jsonBytes)
-        val (entries, warnings) = validate(payload)
+        val (entries, warnings) = validate(payload, url.ifBlank { null })
 
         gameRepository.replaceCatalog(entries)
         preferences.updateCatalogResult(payload.version, null)
@@ -170,9 +170,10 @@ class CatalogRepository(
         return payload
     }
 
-    private fun validate(payload: CatalogPayload): Pair<List<CatalogEntry>, List<String>> {
+    private fun validate(payload: CatalogPayload, baseUrl: String?): Pair<List<CatalogEntry>, List<String>> {
         val warnings = mutableListOf<String>()
         val byId = LinkedHashMap<String, CatalogEntry>()
+        val baseHost = baseUrl?.let { runCatching { URI(it).host?.lowercase() }.getOrNull() }
 
         payload.entries.forEach { dto ->
             val console = consoleFor(dto.console)
@@ -190,13 +191,14 @@ class CatalogRepository(
             }
 
             val sha = dto.sha256?.trim()?.lowercase().orEmpty()
-            val hasUrl = !dto.url.isNullOrBlank()
+            val downloadUrl = resolve(baseUrl, dto.url)
+            val hasUrl = !downloadUrl.isNullOrBlank()
             if (hasUrl && !SHA256_PATTERN.matches(sha)) {
                 warnings += "'${dto.title}' ignorado: download sem SHA-256."
                 return@forEach
             }
-            if (hasUrl && !isAllowedUrl(dto.url!!)) {
-                warnings += "'${dto.title}' ignorado: URL não permitida (use https)."
+            if (hasUrl && !isAllowedUrl(downloadUrl!!, baseHost)) {
+                warnings += "'${dto.title}' ignorado: URL de download não permitida."
                 return@forEach
             }
             if (dto.sizeBytes < 0) {
@@ -227,8 +229,8 @@ class CatalogRepository(
                 fileName = fileName,
                 sizeBytes = dto.sizeBytes,
                 sha256 = sha,
-                url = dto.url?.trim()?.takeIf { it.isNotBlank() },
-                coverUrl = dto.coverUrl?.trim()?.takeIf { it.startsWith("https://") },
+                url = downloadUrl,
+                coverUrl = resolve(baseUrl, dto.coverUrl)?.takeIf { isAllowedUrl(it, baseHost) },
                 description = dto.description?.trim()?.takeIf { it.isNotBlank() },
                 developer = dto.developer?.trim()?.takeIf { it.isNotBlank() },
                 releaseYear = dto.releaseYear?.takeIf { it in 1970..2100 },
@@ -255,12 +257,32 @@ class CatalogRepository(
         }
     }
 
-    private fun isAllowedUrl(url: String): Boolean = runCatching {
+    /**
+     * Resolve a URL de um item do catálogo contra a URL do catálogo.
+     *
+     * O servidor manda caminhos relativos (`/api/download/x`), então o mesmo
+     * catálogo assinado funciona em qualquer IP/porta — e um catálogo antigo
+     * nunca aponta para um servidor que não seja o do usuário.
+     */
+    private fun resolve(baseUrl: String?, value: String?): String? {
+        val raw = value?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        if (baseUrl.isNullOrBlank()) return raw
+        return runCatching { URI(baseUrl).resolve(raw).toString() }.getOrDefault(raw)
+    }
+
+    /**
+     * HTTPS sempre; HTTP só no servidor de desenvolvimento local ou no mesmo
+     * host de onde o catálogo veio (o servidor caseiro do usuário). A
+     * integridade não depende do transporte: o catálogo é assinado (Ed25519) e
+     * cada download é conferido pelo SHA-256.
+     */
+    private fun isAllowedUrl(url: String, catalogHost: String?): Boolean = runCatching {
         val uri = URI(url)
+        val host = uri.host?.lowercase()
         when (uri.scheme?.lowercase()) {
             "https" -> true
-            // só para desenvolvimento (adb reverse / emulador)
-            "http" -> uri.host in setOf("127.0.0.1", "localhost", "10.0.2.2")
+            "http" -> host != null && (host in DEV_HOSTS || host == catalogHost)
             else -> false
         }
     }.getOrDefault(false)
@@ -273,6 +295,7 @@ class CatalogRepository(
 
     companion object {
         private const val MAX_CATALOG_BYTES = 32 * 1024 * 1024L
+        private val DEV_HOSTS = setOf("127.0.0.1", "localhost", "10.0.2.2")
         private val ID_PATTERN = Regex("[a-z0-9][a-z0-9._-]{1,63}")
         private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
         private val MD5_PATTERN = Regex("[a-f0-9]{32}")
