@@ -18,7 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -31,6 +33,7 @@ import com.retrobox.ui.components.RetroLogo
 import com.retrobox.ui.emulator.EmulatorActivity
 import com.retrobox.ui.screens.home.components.ConsoleSidebar
 import com.retrobox.ui.screens.home.components.GameGrid
+import com.retrobox.ui.screens.home.mascots.MascotOverlay
 import com.retrobox.ui.theme.BackgroundDark
 import com.retrobox.ui.theme.NeonBlue
 import com.retrobox.ui.theme.SurfaceDark
@@ -41,6 +44,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
     val selectedConsole by viewModel.selectedConsole.collectAsState()
     val games by viewModel.games.collectAsState()
     val context = LocalContext.current
+
+    // Cada clique na barra lateral incrementa o contador; 0 = nenhuma animação
+    // disparada (nada acontece ao abrir o app).
+    var mascotTick by remember { mutableIntStateOf(0) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -144,7 +151,11 @@ fun HomeScreen(viewModel: HomeViewModel) {
             Row(modifier = Modifier.fillMaxSize()) {
                 ConsoleSidebar(
                     selectedConsole = selectedConsole,
-                    onConsoleSelected = { viewModel.selectConsole(it) }
+                    onConsoleSelected = { console ->
+                        viewModel.selectConsole(console)
+                        // dispara sempre, inclusive no console já selecionado
+                        mascotTick++
+                    }
                 )
 
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -160,6 +171,15 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     )
                 }
             }
+
+            // Sobreposição puramente visual: fica acima da biblioteca, mas
+            // abaixo dos FABs (que o Scaffold desenha por cima do conteúdo) e
+            // sem capturar toques.
+            MascotOverlay(
+                console = selectedConsole,
+                trigger = mascotTick,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 }
