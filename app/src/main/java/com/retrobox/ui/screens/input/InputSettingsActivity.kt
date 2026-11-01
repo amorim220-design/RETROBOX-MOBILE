@@ -234,7 +234,7 @@ private fun InputSettingsScreen(
                                     }
                                 },
                                 label = {
-                                    Text(style.name.lowercase().replaceFirstChar { it.uppercase() })
+                                    Text(style.displayName)
                                 }
                             )
                         }

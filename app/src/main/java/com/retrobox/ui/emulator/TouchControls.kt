@@ -1,6 +1,7 @@
 package com.retrobox.ui.emulator
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -67,6 +69,26 @@ fun TouchControls(
     val haptic = LocalHapticFeedback.current
 
     Box(modifier = modifier.fillMaxSize().alpha(alpha)) {
+        // Painel de fundo dos estilos Neon/Arcade (o jogo continua visível acima).
+        style.panel?.let { panelColor ->
+            val shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(268.dp * scale)
+                    .clip(shape)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to panelColor.copy(alpha = panelColor.alpha * 0.1f),
+                            0.3f to panelColor,
+                            1f to panelColor
+                        )
+                    )
+                    .border(1.5.dp, style.panelBorder.copy(alpha = 0.6f), shape)
+            )
+        }
+
         // Direcional (esquerda) ou direcional centralizado (N64).
         val dpad = layout.buttons.filter { it.shape == ConsoleInput.Shape.DPAD }
         if (dpad.isNotEmpty()) {
@@ -106,7 +128,8 @@ fun TouchControls(
                     width = 74.dp * scale,
                     height = 34.dp * scale,
                     fill = style.triggerFill,
-                    content = style.triggerText
+                    content = style.triggerText,
+                    border = if (style.panel != null) style.panelBorder.copy(alpha = 0.75f) else Color.Transparent
                 ) { pressed ->
                     onPress(button.id, pressed)
                     onActivity()
@@ -139,7 +162,8 @@ fun TouchControls(
                         width = 72.dp * scale,
                         height = 30.dp * scale,
                         fill = style.systemFill,
-                        content = style.systemText
+                        content = style.systemText,
+                        border = if (style.panel != null) style.panelBorder.copy(alpha = 0.9f) else Color.Transparent
                     ) { pressed ->
                         onPress(button.id, pressed)
                         onActivity()
@@ -171,11 +195,48 @@ enum class TouchStyle(val id: Int) {
     SWITCH(1),
     FLAT(2),
     OUTLINE(3),
-    CLASSIC(4);
+    CLASSIC(4),
+    NEON(5),
+    ARCADE(6);
 
     companion object {
         fun of(id: Int): TouchStyle = entries.firstOrNull { it.id == id } ?: WIIU
     }
+
+    val displayName: String
+        get() = when (this) {
+            WIIU -> "Wii U"
+            SWITCH -> "Switch"
+            FLAT -> "Flat"
+            OUTLINE -> "Contorno"
+            CLASSIC -> "Clássico"
+            NEON -> "Neon"
+            ARCADE -> "Arcade"
+        }
+
+    /** Fundo do painel atrás dos controles (null = direto sobre o jogo). */
+    val panel: Color?
+        get() = when (this) {
+            NEON -> Color(0xE6060C1A)
+            ARCADE -> Color(0xE61A0308)
+            else -> null
+        }
+
+    val panelBorder: Color
+        get() = when (this) {
+            NEON -> Color(0xFF1E9BFF)
+            ARCADE -> Color(0xFFE01B2E)
+            else -> Color.Transparent
+        }
+
+    /** Botões em relevo (brilho/esfera) em vez de chapados. */
+    val glossy: Boolean get() = this == NEON || this == ARCADE
+
+    /** Direcional desenhado como anel redondo (e não como cruz). */
+    val dpadRing: Boolean get() = this == NEON || this == ARCADE
+
+    /** Analógico com bolinha de manche (estilo fliperama). */
+    val ballStick: Boolean get() = this == ARCADE
 
     val faceFill: Color
         get() = when (this) {
@@ -184,12 +245,16 @@ enum class TouchStyle(val id: Int) {
             FLAT -> Color(0x33121A2A)
             OUTLINE -> Color.Transparent
             CLASSIC -> Color(0xFF3A3F4B)
+            NEON -> Color(0xFF0B1526)
+            ARCADE -> Color(0xFF1B1B1B)
         }
 
     val faceBorder: Color
         get() = when (this) {
             OUTLINE -> Color(0xFF7FD8FF)
             FLAT -> Color.Transparent
+            NEON -> Color(0xFF1E9BFF)
+            ARCADE -> Color(0xFFE01B2E)
             else -> Color(0xFF7FD8FF)
         }
 
@@ -200,15 +265,65 @@ enum class TouchStyle(val id: Int) {
             FLAT -> Color(0xFFD7E3F4)
             OUTLINE -> Color(0xFF7FD8FF)
             CLASSIC -> Color(0xFFFFE9A8)
+            NEON -> Color(0xFFFFFFFF)
+            ARCADE -> Color(0xFFFFFFFF)
         }
 
-    val triggerFill: Color get() = Color(0xCC2A3140)
-    val triggerText: Color get() = Color(0xFFD7E3F4)
-    val systemFill: Color get() = Color(0x992A3140)
-    val systemText: Color get() = Color(0xFFD7E3F4)
+    /**
+     * Cor de destaque do botão de face.
+     *
+     * Neon segue as cores do controle (verde/vermelho/azul/amarelo, como na
+     * referência). Arcade usa a paleta de seis botões de fliperama, escolhida
+     * pela posição para ficar igual em qualquer console.
+     */
+    fun accent(label: String, slot: Int): Color = when (this) {
+        NEON -> when (label.trim().uppercase()) {
+            "A" -> Color(0xFF2BE36B)
+            "B", "○" -> Color(0xFFFF3355)
+            "X", "✕" -> Color(0xFF2FA8FF)
+            "Y", "△" -> Color(0xFFFFD524)
+            "□" -> Color(0xFFFF4FD8)
+            "START" -> Color(0xFF2BE36B)
+            else -> Color(0xFF1E9BFF)
+        }
+        ARCADE -> when (slot) {
+            0 -> Color(0xFFE8262B)   // vermelho
+            1 -> Color(0xFFFFC417)   // amarelo
+            2 -> Color(0xFF9B2BE8)   // roxo
+            3 -> Color(0xFF14A02B)   // verde
+            4 -> Color(0xFF1D6BF0)   // azul
+            else -> Color(0xFFFF7A00) // laranja
+        }
+        else -> faceText
+    }
+
+    val triggerFill: Color
+        get() = when (this) {
+            NEON -> Color(0xCC0B1B33)
+            ARCADE -> Color(0xCC22060A)
+            else -> Color(0xCC2A3140)
+        }
+    val triggerText: Color
+        get() = when (this) {
+            NEON -> Color(0xFF7FD3FF)
+            ARCADE -> Color(0xFFFFB0B8)
+            else -> Color(0xFFD7E3F4)
+        }
+    val systemFill: Color
+        get() = when (this) {
+            NEON -> Color(0xCC0B1B33)
+            ARCADE -> Color(0xCC22060A)
+            else -> Color(0x992A3140)
+        }
+    val systemText: Color
+        get() = when (this) {
+            NEON -> Color(0xFFE8F6FF)
+            ARCADE -> Color(0xFFFFD9DC)
+            else -> Color(0xFFD7E3F4)
+        }
 
     val systemShape: Shape get() = RoundedCornerShape(14.dp)
-    val dpadShape: Shape get() = CircleShape
+    val dpadShape: Shape get() = if (dpadRing) CircleShape else CircleShape
     val faceShape: Shape get() = CircleShape
 }
 
@@ -226,6 +341,23 @@ private fun DPad(
 
     // a cruz ocupa 3x3 células: direcional no meio
     Box(modifier = modifier.size(key * 3)) {
+        if (style.dpadRing) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(CircleShape)
+                    .background(style.faceFill.copy(alpha = 0.55f))
+                    .border(2.dp, style.faceBorder.copy(alpha = 0.55f), CircleShape)
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(key * 1.02f)
+                    .clip(CircleShape)
+                    .background(style.faceFill.copy(alpha = 0.7f))
+                    .border(1.5.dp, style.faceBorder.copy(alpha = 0.35f), CircleShape)
+            )
+        }
         PadCell(button(4)?.id, "↑", key, key, 0.dp, style, onPress)
         PadCell(button(5)?.id, "↓", key, key, key * 2, style, onPress)
         PadCell(button(6)?.id, "←", key, 0.dp, key, style, onPress)
@@ -249,7 +381,7 @@ private fun PadCell(
             .offset(x = dx, y = dy)
             .size(size)
             .clip(style.dpadShape)
-            .background(style.faceFill)
+            .background(if (style.dpadRing) Color.Transparent else style.faceFill)
             .pointerInput(id) {
                 detectTapGestures(
                     onPress = {
@@ -261,7 +393,12 @@ private fun PadCell(
             },
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = style.faceText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            label,
+            color = if (style.dpadRing) style.faceBorder else style.faceText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -313,11 +450,34 @@ private fun FaceKey(
     onPress: (Int, Boolean) -> Unit
 ) {
     var pressed by remember { mutableStateOf(false) }
+    val accent = style.accent(button.label, button.slot)
+
+    val brush: Brush = when {
+        !style.glossy -> androidx.compose.ui.graphics.SolidColor(style.faceFill)
+        pressed -> Brush.radialGradient(
+            listOf(accent, accent.copy(alpha = 0.55f), Color(0xFF0A0A0A))
+        )
+        else -> Brush.radialGradient(
+            listOf(
+                accent.copy(alpha = 0.95f),
+                accent.copy(alpha = 0.7f),
+                Color(0xFF0A0A0A)
+            )
+        )
+    }
+
     Box(
         modifier = Modifier
             .size(size)
             .clip(style.faceShape)
-            .background(if (pressed) style.faceBorder.copy(alpha = 0.5f) else style.faceFill)
+            .background(brush, style.faceShape)
+            .then(
+                if (style.glossy) {
+                    Modifier.border(2.dp, accent.copy(alpha = if (pressed) 1f else 0.85f), style.faceShape)
+                } else {
+                    Modifier
+                }
+            )
             .pointerInput(button.id) {
                 detectTapGestures(
                     onPress = {
@@ -337,6 +497,18 @@ private fun FaceKey(
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold
         )
+        // brilho superior: dá o efeito de botão de acrílico
+        if (style.glossy && !pressed) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 4.dp)
+                    .fillMaxWidth(0.45f)
+                    .height(size * 0.16f)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.22f))
+            )
+        }
     }
 }
 
@@ -349,6 +521,7 @@ private fun PillKey(
     height: androidx.compose.ui.unit.Dp,
     fill: Color,
     content: Color,
+    border: Color = Color.Transparent,
     onPress: (Boolean) -> Unit
 ) {
     var pressed by remember { mutableStateOf(false) }
@@ -358,6 +531,7 @@ private fun PillKey(
             .height(height)
             .clip(shape)
             .background(if (pressed) fill.copy(alpha = 0.6f) else fill)
+            .then(if (border != Color.Transparent) Modifier.border(1.5.dp, border, shape) else Modifier)
             .pointerInput(label) {
                 detectTapGestures(
                     onPress = {
@@ -408,6 +582,13 @@ private fun AnalogStick(
             .size(size)
             .clip(CircleShape)
             .background(style.faceFill.copy(alpha = 0.55f))
+            .then(
+                if (style.dpadRing) {
+                    Modifier.border(2.dp, style.faceBorder.copy(alpha = 0.5f), CircleShape)
+                } else {
+                    Modifier
+                }
+            )
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { offset ->
@@ -432,10 +613,25 @@ private fun AnalogStick(
     ) {
         Box(
             modifier = Modifier
-                .size(size * 0.42f)
+                .size(if (style.ballStick) size * 0.5f else size * 0.42f)
                 .offset(x = (size * 0.28f * knob), y = (size * 0.28f * knobY))
                 .clip(CircleShape)
-                .background(style.faceBorder.copy(alpha = 0.75f))
+                .background(
+                    if (style.ballStick) {
+                        Brush.radialGradient(
+                            listOf(Color(0xFFFF5A5A), Color(0xFFD3101B), Color(0xFF6B0309))
+                        )
+                    } else {
+                        androidx.compose.ui.graphics.SolidColor(style.faceBorder.copy(alpha = 0.75f))
+                    }
+                )
+                .then(
+                    if (style.ballStick) {
+                        Modifier.border(1.5.dp, Color(0xFF2A0206), CircleShape)
+                    } else {
+                        Modifier
+                    }
+                )
         )
     }
 }

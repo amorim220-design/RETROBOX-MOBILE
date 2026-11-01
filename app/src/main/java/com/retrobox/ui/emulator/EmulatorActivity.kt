@@ -547,7 +547,7 @@ class EmulatorActivity : ComponentActivity() {
                     }
                     MenuAction(
                         "Controles: zona morta ${inputProfile?.deadzone ?: 15}%" +
-                            " · estilo ${TouchStyle.of(inputProfile?.onScreenStyle ?: 0).name.lowercase()}"
+                            " · estilo ${TouchStyle.of(inputProfile?.onScreenStyle ?: 0).displayName.lowercase()}"
                     ) {
                         showMenu = false
                         startActivity(
