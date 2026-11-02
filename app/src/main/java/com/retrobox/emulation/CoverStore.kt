@@ -32,16 +32,12 @@ object CoverStore {
 
     /** Repositorio de thumbnails de cada sistema. */
     private val REPOSITORIES = mapOf(
-        Console.NES to "Nintendo - Nintendo Entertainment System",
         Console.SNES to "Nintendo - Super Nintendo Entertainment System",
-        Console.GB to "Nintendo - Game Boy",
-        Console.GBC to "Nintendo - Game Boy Color",
         Console.GBA to "Nintendo - Game Boy Advance",
         Console.MEGADRIVE to "Sega - Mega Drive - Genesis",
         Console.N64 to "Nintendo - Nintendo 64",
         Console.PS1 to "Sony - PlayStation",
         Console.PSP to "Sony - PlayStation Portable",
-        Console.NDS to "Nintendo - Nintendo DS"
     )
 
     /** Pastas do repositorio: box art (capa de caixa) e snapshot (foto da tela). */
