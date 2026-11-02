@@ -10,6 +10,9 @@ on:
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-apk.yml"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
