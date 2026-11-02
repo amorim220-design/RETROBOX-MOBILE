@@ -10,6 +10,11 @@ emulação rodam no mesmo processo: o usuário não instala RetroArch, PPSSPP ou
 
 ---
 
+
+### Desempenho adaptativo
+
+O frontend mede a taxa de quadros efetiva durante a execução. Quando o desempenho cai abaixo da meta do jogo, ativa descarte adaptativo de quadros apenas na apresentação gráfica (níveis de 1/2 ou 2/3); a emulação, a lógica do jogo e a geração de áudio continuam executando em cada chamada do núcleo. O descarte volta a zero quando a taxa se recupera. Esse ajuste reduz parte do custo de renderização, mas não garante 60 FPS em hardware limitado.
+
 ## 1. Estado atual
 
 | Camada | Situação |
