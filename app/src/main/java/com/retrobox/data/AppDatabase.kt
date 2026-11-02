@@ -8,7 +8,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Game::class, CatalogEntry::class, DownloadRecord::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -79,6 +79,18 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             }
         }
+        /**
+         * v5: remove consoles descontinuados do banco, preservando ROMs e saves no armazenamento.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val removed = "'NES','GB','GBC','NDS','nes','gb','gbc','nds'"
+                db.execSQL("DELETE FROM downloads WHERE catalogId IN (SELECT id FROM catalog WHERE console IN ($removed))")
+                db.execSQL("DELETE FROM catalog WHERE console IN ($removed)")
+                db.execSQL("DELETE FROM games WHERE console IN ($removed)")
+            }
+        }
+
         /**
          * v4: identidade das ROMs pelo catálogo oficial.
          *
