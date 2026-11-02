@@ -901,6 +901,8 @@ void Emulator::runLoop() {
     auto nextFrame = clock::now();
     auto fpsWindow = clock::now();
     int frames = 0;
+    renderSkipCounter_ = 0;
+    renderSkipLevel_ = 0;
 
     while (!stopRequested_) {
         {
@@ -928,7 +930,18 @@ void Emulator::runLoop() {
 
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - fpsWindow).count();
         if (elapsed >= 1000) {
-            measuredFps_.store(frames * 1000.0 / static_cast<double>(elapsed));
+            const double actualFps = frames * 1000.0 / static_cast<double>(elapsed);
+            measuredFps_.store(actualFps);
+            if (adaptivePerformance_.load(std::memory_order_relaxed)) {
+                const double ratio = actualFps / fps_;
+                int level = renderSkipLevel_.load(std::memory_order_relaxed);
+                if (ratio < 0.78) level = 2;
+                else if (ratio < 0.93) level = 1;
+                else if (ratio > 0.98) level = 0;
+                renderSkipLevel_.store(level, std::memory_order_relaxed);
+            } else {
+                renderSkipLevel_.store(0, std::memory_order_relaxed);
+            }
             static int report = 0;
             if (report < 3) {
                 LOGI("loop: %d quadros em %lld ms (fps %.1f)", frames,
@@ -1015,6 +1028,8 @@ int16_t Emulator::inputState(unsigned port, unsigned device, unsigned index, uns
 }
 
 void Emulator::videoRefresh(const void *data, unsigned width, unsigned height, size_t pitch) {
+    const int skipLevel = renderSkipLevel_.load(std::memory_order_relaxed);
+    if (skipLevel > 0 && (++renderSkipCounter_ % static_cast<unsigned>(skipLevel + 1)) != 0) return;
     static int frames = 0;
     if (frames < 3) {
         LOGI("video refresh: %ux%u pitch=%zu data=%p", width, height, pitch, data);

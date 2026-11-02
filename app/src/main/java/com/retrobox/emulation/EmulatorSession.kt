@@ -66,6 +66,7 @@ class EmulatorSession(private val context: Context) {
         }
 
         NativeEmulator.nativeSetDirectories(systemDir.absolutePath, saveDir.absolutePath)
+        NativeEmulator.nativeSetAdaptivePerformance(true)
         NativeEmulator.nativeSetLanguage(localeLanguage())
 
         val coreError = NativeEmulator.nativeLoadCore(CoreRegistry.libraryPath(context, activeCore))

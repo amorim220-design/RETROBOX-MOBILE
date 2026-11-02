@@ -45,8 +45,6 @@ object ConsoleInput {
         val hasAnalog: Boolean = false,
         /** o direcional é centralizado (N64) */
         val centralDpad: Boolean = false,
-        /** o console tem botão de sensor (NDS) */
-        val hasSensor: Boolean = false
     )
 
     private fun dpad() = listOf(
@@ -57,16 +55,6 @@ object ConsoleInput {
     )
 
     private val layouts: Map<Console, Layout> = mapOf(
-        // NES: A e B trocados em relação ao padrão do RetroPad.
-        Console.NES to Layout(
-            console = Console.NES,
-            buttons = listOf(
-                Button(RetroButton.B, "A", Shape.FACE, BOTTOM_RIGHT),
-                Button(RetroButton.A, "B", Shape.FACE, BOTTOM_LEFT),
-                Button(RetroButton.SELECT, "SELECT", Shape.SYSTEM),
-                Button(RetroButton.START, "START", Shape.SYSTEM)
-            ) + dpad()
-        ),
         // SNES: Y/X em cima, B/A embaixo.
         Console.SNES to Layout(
             console = Console.SNES,
@@ -77,25 +65,6 @@ object ConsoleInput {
                 Button(RetroButton.A, "A", Shape.FACE, BOTTOM_RIGHT),
                 Button(RetroButton.L, "L", Shape.TRIGGER),
                 Button(RetroButton.R, "R", Shape.TRIGGER),
-                Button(RetroButton.SELECT, "SELECT", Shape.SYSTEM),
-                Button(RetroButton.START, "START", Shape.SYSTEM)
-            ) + dpad()
-        ),
-        // Game Boy: só A e B + direcional + START/SELECT.
-        Console.GB to Layout(
-            console = Console.GB,
-            buttons = listOf(
-                Button(RetroButton.B, "B", Shape.FACE, BOTTOM_LEFT),
-                Button(RetroButton.A, "A", Shape.FACE, BOTTOM_RIGHT),
-                Button(RetroButton.SELECT, "SELECT", Shape.SYSTEM),
-                Button(RetroButton.START, "START", Shape.SYSTEM)
-            ) + dpad()
-        ),
-        Console.GBC to Layout(
-            console = Console.GBC,
-            buttons = listOf(
-                Button(RetroButton.B, "B", Shape.FACE, BOTTOM_LEFT),
-                Button(RetroButton.A, "A", Shape.FACE, BOTTOM_RIGHT),
                 Button(RetroButton.SELECT, "SELECT", Shape.SYSTEM),
                 Button(RetroButton.START, "START", Shape.SYSTEM)
             ) + dpad()
@@ -156,21 +125,6 @@ object ConsoleInput {
                 Button(RetroButton.SELECT, "SELECT", Shape.SYSTEM),
                 Button(RetroButton.START, "START", Shape.SYSTEM)
             ) + dpad()
-        ),
-        // Nintendo DS: padrão + tela de toque.
-        Console.NDS to Layout(
-            console = Console.NDS,
-            buttons = listOf(
-                Button(RetroButton.X, "X", Shape.FACE, TOP_LEFT),
-                Button(RetroButton.Y, "Y", Shape.FACE, TOP_RIGHT),
-                Button(RetroButton.B, "B", Shape.FACE, BOTTOM_LEFT),
-                Button(RetroButton.A, "A", Shape.FACE, BOTTOM_RIGHT),
-                Button(RetroButton.L, "L", Shape.TRIGGER),
-                Button(RetroButton.R, "R", Shape.TRIGGER),
-                Button(RetroButton.SELECT, "SELECT", Shape.SYSTEM),
-                Button(RetroButton.START, "START", Shape.SYSTEM)
-            ) + dpad(),
-            hasSensor = true
         ),
         // PSP: analógico + botões.
         Console.PSP to Layout(
@@ -243,13 +197,8 @@ object ConsoleInput {
         map[android.view.KeyEvent.KEYCODE_S] = RetroButton.L
         map[android.view.KeyEvent.KEYCODE_D] = RetroButton.R
 
-        // Ajuste por console (NES tem A/B trocados; N64 usa ids diferentes).
+        // Ajustes específicos por console (N64 e Mega Drive).
         return when (console) {
-            Console.NES -> map.toMutableMap().apply {
-                this[android.view.KeyEvent.KEYCODE_BUTTON_A] = RetroButton.B
-                this[android.view.KeyEvent.KEYCODE_BUTTON_B] = RetroButton.A
-                this[android.view.KeyEvent.KEYCODE_SPACE] = RetroButton.B
-            }
             Console.N64 -> map.toMutableMap().apply {
                 // N64: A, B, Z(Y) e C no SELECT/START/UP/DOWN.
                 this[android.view.KeyEvent.KEYCODE_BUTTON_X] = RetroButton.Y

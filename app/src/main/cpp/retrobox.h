@@ -180,6 +180,7 @@ void setAxis(int port, int index, int axis, int value);
 
     void reset();
     void setFastForward(bool enabled) { fastForward_ = enabled; }
+    void setAdaptivePerformance(bool enabled) { adaptivePerformance_ = enabled; if (!enabled) renderSkipLevel_ = 0; }
     bool isLoaded() const { return gameLoaded_; }
     std::string systemInfo() const;
     std::string geometryInfo() const;
@@ -243,6 +244,9 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> stopRequested_{false};
     std::atomic<bool> fastForward_{false};
+    std::atomic<bool> adaptivePerformance_{true};
+    std::atomic<int> renderSkipLevel_{0};
+    unsigned renderSkipCounter_ = 0;
     std::atomic<bool> gameLoaded_{false};
     std::atomic<bool> rumbleEnabled_{false};
     std::atomic<double> measuredFps_{0.0};

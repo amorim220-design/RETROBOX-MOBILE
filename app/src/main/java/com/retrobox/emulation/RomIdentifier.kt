@@ -107,12 +107,6 @@ object RomIdentifier {
      */
     fun readSerial(file: File, console: Console): String? = runCatching {
         when (console) {
-            Console.NES -> readBytes(file, 0x7F, 8)
-                ?.filter { it in 0x20..0x7E }
-                ?.joinToString("") { it.toInt().toChar().toString() }
-                ?.trim()
-                ?.takeIf { it.length >= 3 }
-
             Console.SNES -> readBytes(file, 0x7FC0, 21)
                 ?.joinToString("") { it.toInt().toChar().toString() }
                 ?.trim()

@@ -128,6 +128,11 @@ Java_com_retrobox_emulation_NativeEmulator_nativeSetFastForward(JNIEnv *, jobjec
 }
 
 JNIEXPORT void JNICALL
+Java_com_retrobox_emulation_NativeEmulator_nativeSetAdaptivePerformance(JNIEnv *, jobject, jboolean enabled) {
+    Emulator::instance().setAdaptivePerformance(enabled == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
 Java_com_retrobox_emulation_NativeEmulator_nativeSetLinearFilter(JNIEnv *, jobject, jboolean linear) {
     Emulator::instance().setLinearFilter(linear == JNI_TRUE);
 }

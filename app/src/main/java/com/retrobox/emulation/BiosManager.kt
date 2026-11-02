@@ -53,9 +53,6 @@ object BiosManager {
 
     private const val KB = 1024L
     private val PS1_SIZE = 512 * KB
-    private val NDS_BIOS7 = 16 * KB
-    private val NDS_BIOS9 = 4 * KB
-    private val NDS_FIRMWARE = setOf(256 * KB, 512 * KB)
 
     val requirements: List<Requirement> = listOf(
         Requirement(
@@ -72,18 +69,6 @@ object BiosManager {
             required = false,
             note = "Sem BIOS o PCSX-ReARMed usa HLE; alguns jogos têm glitches. " +
                 "OpenBIOS é uma alternativa livre."
-        ),
-        Requirement(
-            console = Console.NDS,
-            groups = listOf(listOf("bios7.bin"), listOf("bios9.bin")),
-            files = listOf(
-                BiosFile("bios7.bin", "ARM7 BIOS", setOf(NDS_BIOS7)),
-                BiosFile("bios9.bin", "ARM9 BIOS", setOf(NDS_BIOS9)),
-                BiosFile("firmware.bin", "Firmware (opcional)", NDS_FIRMWARE)
-            ),
-            required = false,
-            note = "O melonDS inclui FreeBIOS; o firmware do aparelho melhora " +
-                "compatibilidade de saves e configurações."
         ),
         Requirement(
             console = Console.PSP,

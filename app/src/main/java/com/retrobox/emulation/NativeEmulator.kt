@@ -27,6 +27,7 @@ object NativeEmulator {
     /** Eixo analogico: index 0 = stick esquerdo, 1 = direito; axis 0 = X, 1 = Y. */
     external fun nativeSetAxis(port: Int, index: Int, axis: Int, value: Int)
     external fun nativeSetFastForward(enabled: Boolean)
+    external fun nativeSetAdaptivePerformance(enabled: Boolean)
     external fun nativeSetLinearFilter(linear: Boolean)
     external fun nativeSetAspectMode(mode: Int)
 

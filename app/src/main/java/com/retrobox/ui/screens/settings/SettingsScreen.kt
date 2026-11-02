@@ -261,8 +261,8 @@ fun SettingsScreen(
                         color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "9 núcleos libretro embutidos (FCEUmm, Snes9x 2005 Plus, Gambatte, mGBA, " +
-                            "Genesis Plus GX, PCSX-ReARMed, Mupen64Plus-Next, melonDS, PPSSPP). " +
+                        "6 núcleos libretro embutidos (Snes9x 2005 Plus, mGBA, Genesis Plus GX, " +
+                            "PCSX-ReARMed, Mupen64Plus-Next e PPSSPP). " +
                             "Núcleos GPL/LGPL: o app não inclui ROMs nem BIOS.",
                         color = Color.White.copy(alpha = 0.5f),
                         fontSize = 11.sp
