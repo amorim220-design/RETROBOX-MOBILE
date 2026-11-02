@@ -36,9 +36,7 @@ object LibraryImporter {
 
     /** Extensoes que sao o "ponto de entrada" de um jogo. */
     private val ENTRY_EXTENSIONS = mapOf(
-        "nes" to Console.NES, "unf" to Console.NES, "unif" to Console.NES,
         "smc" to Console.SNES, "sfc" to Console.SNES, "fig" to Console.SNES, "swc" to Console.SNES,
-        "gb" to Console.GB, "gbc" to Console.GBC,
         "gba" to Console.GBA, "agb" to Console.GBA,
         "md" to Console.MEGADRIVE, "gen" to Console.MEGADRIVE, "smd" to Console.MEGADRIVE,
         "n64" to Console.N64, "v64" to Console.N64, "z64" to Console.N64,
@@ -55,11 +53,8 @@ object LibraryImporter {
 
     /** Pastas que identificam o console. */
     private val FOLDER_CONSOLES = mapOf(
-        "NES" to Console.NES,
         "SNES" to Console.SNES, "SUPER NINTENDO" to Console.SNES,
         "SUPER NINTENDO ENTERTAINMENT SYSTEM" to Console.SNES,
-        "GAME BOY" to Console.GB, "GB" to Console.GB,
-        "GAME BOY COLOR" to Console.GBC, "GBC" to Console.GBC,
         "GAME BOY ADVANCE" to Console.GBA, "GBA" to Console.GBA,
         "MEGA DRIVE" to Console.MEGADRIVE, "GENESIS" to Console.MEGADRIVE,
         "SEGA MEGA DRIVE" to Console.MEGADRIVE,
