@@ -65,6 +65,13 @@ fun MascotOverlay(
                 alpha = minOf(fadeIn, fadeOut)
             }
     ) {
-        mascot.draw(this, progress.value)
+        // O primeiro frame da Animatable começa em t=0. Nesse instante a
+        // escala de entrada (pop) dos mascotes é zero, o que produz raios
+        // inválidos em Brush.radialGradient (ending radius must be > 0).
+        // Também ignoramos frames de layout ainda sem dimensões válidas.
+        val t = progress.value
+        if (size.width > 0f && size.height > 0f && t > 0.001f) {
+            mascot.draw(this, t)
+        }
     }
 }
