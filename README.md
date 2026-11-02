@@ -39,7 +39,6 @@ emulação rodam no mesmo processo: o usuário não instala RetroArch, PPSSPP ou
 | Cenário | Resultado |
 |---|---|
 | Importação em lote de 41 ROMs (SNES/GBA/N64/MD) | ✅ 41 jogos, 28 capas |
-| NES (FCEUmm) | ✅ 60 fps, áudio OK, save state OK |
 | SNES (Snes9x 2005 Plus) | ✅ **59,8–60,5 fps** em aparelho real (arm64) |
 | Toque nos controles on-screen | ✅ (multitoque) |
 | Save state / load state | ✅ (46 KB por estado) |
@@ -117,14 +116,11 @@ O contexto GL precisa existir na mesma thread que roda `retro_run`, por isso tud
 
 | Console | Núcleo | `.so` | Licença |
 |---|---|---|---|
-| NES | FCEUmm | `libfceumm_libretro.so` | GPLv2 |
 | SNES | Snes9x 2005 Plus | `libsnes9x2005_plus_libretro.so` | Snes9x (não comercial) |
-| GB / GBC | Gambatte | `libgambatte_libretro.so` | GPLv2 |
 | GBA | mGBA | `libmgba_libretro.so` | MPL 2.0 |
 | Mega Drive | Genesis Plus GX | `libgenesis_plus_gx_libretro.so` | não comercial |
 | PS1 | PCSX-ReARMed | `libpcsx_rearmed_libretro.so` | GPLv2 |
 | N64 | Mupen64Plus-Next (GLES3) | `libmupen64plus_next_gles3_libretro.so` | GPLv2 |
-| NDS | melonDS | `libmelonds_libretro.so` | GPLv3 |
 | PSP | PPSSPP | `libppsspp_libretro.so` | GPLv2+ |
 
 Os binários vêm do buildbot oficial do libretro (`nightly/android/latest/<abi>/`) e foram
@@ -132,7 +128,7 @@ renomeados para `lib*.so` porque o AGP só empacota arquivos com esse prefixo.
 
 ### Licença do app
 
-Como o APK **liga** núcleos GPL (melonDS/GPLv3, FCEUmm/GPLv2, PCSX-ReARMed/GPLv2, Mupen64Plus/GPLv2,
+Como o APK **liga** núcleos GPL (PCSX-ReARMed/GPLv2, Mupen64Plus/GPLv2,
 PPSSPP/GPLv2+), a distribuição do conjunto precisa ser GPLv3 com o código-fonte disponível.
 Uso pessoal/privado não muda nada tecnicamente, mas **não distribua o APK fechado**.
 
@@ -210,7 +206,7 @@ uma capa gerada (gradiente do console + título).
 
 BIOS (opcional): o app **não inclui nem baixa BIOS**. Em **Ajustes → Gerenciar BIOS** (ou no
 menu do emulador) você importa o arquivo que já tem: `scph5501.bin` (PS1, 512 KB),
-`bios7.bin`/`bios9.bin` (NDS), `firmware.bin` (opcional). O arquivo é validado por
+`firmware.bin` (opcional). O arquivo é validado por
 tamanho e gravado em `files/system/`. Sem BIOS, o PCSX-ReARMed usa HLE; o app só
 **avisa** (não bloqueia) e oferece *Continuar / Importar / Gerenciar*.
 
@@ -313,7 +309,7 @@ adb reverse tcp:8000 tcp:8000
 
 ## 7. Próximos passos sugeridos
 
-1. Medir FPS/áudio de cada um dos 9 núcleos no aparelho real.
+1. Medir FPS/áudio de cada um dos 6 núcleos no aparelho real.
 2. Extração de `.zip`/`.7z` no import (cache do app).
 3. Mapeamento de botões por console (PS1: △○×□ em vez de A/B/X/Y; SNES: layout Nintendo).
 4. UI de opções por núcleo (parsing seguro de `SET_CORE_OPTIONS_V2`).
